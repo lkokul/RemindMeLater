@@ -852,6 +852,49 @@ ahora se llama `device`.
         `selectionchange` no llegaba y los botones se quedaban
         encendidos como estaban antes.
 
+    - **FASE 1 de la ronda grande: los dos modos de escribir**
+      (drivers `drive-md.js`, `forzar-md.js` y `drive-guia.js`; los
+      fallos que salieron y su arreglo estan en
+      `ERRORES-Y-SOLUCIONES.md`):
+      - **Word / Markdown** es un interruptor de dos posiciones arriba a
+        la derecha de la cinta. El MISMO documento visto de dos maneras:
+        lo que se guarda sigue siendo el HTML de siempre, asi que el
+        PDF, el .rmproj y las bases de datos no se enteran. El Markdown
+        es una VISTA, no otro formato de almacenamiento.
+      - **La regla que lo explica todo: una linea = un bloque.** No hay
+        parrafos que se juntan al escribir varias lineas seguidas, como
+        en el Markdown clasico. Eso es lo que hace que el viaje
+        HTML -> Markdown -> HTML sea EXACTO, que es lo unico que permite
+        cambiar de modo sin perder nada.
+      - Lo que el Markdown no sabe decir va con DOS convenciones: un
+        sufijo `{centro}` / `{derecha}` / `{justificado}` / `{v-centro}`
+        / `{cerrado}` al final de la linea, y directivas
+        `::: nombre argumentos` (base-de-datos, desplegable, indice,
+        indice-de-figuras, salto-de-pagina, y tabla con anchos/altos/
+        sin-cabecera/ancho-completo). Los callouts usan la sintaxis de
+        alerts de GitHub (`> [!CONSEJO]`), aceptando tambien las
+        palabras inglesas por si se pega algo de un README.
+      - **`__asi__` es SUBRAYADO, no negrita** (en Markdown estandar es
+        negrita). Se eligio asi porque la herramienta tiene subrayado y
+        el Markdown normal no sabe decirlo; la negrita es siempre
+        `**asi**`. Esta avisado en la guia.
+      - **Al volver a Word solo se re-parsea si el texto CAMBIO**: mirar
+        el documento en Markdown y volver no reescribe nada, asi que no
+        se pierde ningun detalle que el Markdown no supiera decir.
+      - Mientras se escribe en Markdown, cada 600 ms se vuelca al cuerpo
+        (oculto) y se guarda de ahi: el cuerpo sigue siendo la UNICA
+        fuente de lo que se guarda.
+      - La cinta funciona en los dos modos: cada boton tiene su accion
+        `md` (escribe la marca) ademas de la de Word, y los atajos
+        (Ctrl+B/I/U, Ctrl+Q/T/D/J, Tab) tambien. Los botones que no
+        aplican se ven apagados, no desaparecen.
+      - La guia gana TRES apartados, como los pidio Koku: "Con la barra
+        de herramientas", "Escribiendo en Markdown" y "Con el teclado".
+      - **Cuidado al escribir codigo con el Write tool**: convierte los
+        `\u0000` / `\x00` del contenido en bytes NUL de verdad. Un NUL
+        dentro de app.js hace que git y grep lo traten como binario y se
+        pierdan los diffs de texto.
+
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
 - **`elemento.focus()` a secas sobre un contenteditable manda el cursor

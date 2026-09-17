@@ -3463,6 +3463,47 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   font-size: 0.82rem;
 }
 .proyectos-ribbon-caret { opacity: 0.5; font-size: 0.7rem; }
+
+/* El interruptor Word / Markdown, a la derecha de las pestañas. Es UN
+   control de dos posiciones (como los de Configuración), no dos botones
+   sueltos: se ve de un vistazo en cuál estás. */
+.proyectos-modo {
+  display: inline-flex; align-items: center;
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 2px; margin-bottom: 0.25rem;
+  background: var(--surface-2);
+}
+.proyectos-modo button {
+  border: none; background: none; color: inherit;
+  font: inherit; font-size: 0.75rem; font-weight: 600;
+  padding: 0.18rem 0.7rem; border-radius: 999px;
+  cursor: pointer; opacity: 0.6;
+}
+.proyectos-modo button:hover { opacity: 1; }
+.proyectos-modo button.active {
+  background: var(--accent); color: var(--accent-text);
+  opacity: 1;
+}
+
+/* La caja de Markdown ocupa el sitio del cuerpo. Monoespaciada, sin
+   barras propias (crece con el texto) y con el mismo aire que el
+   documento, para que cambiar de modo no dé un salto visual. */
+.proyectos-md {
+  width: 100%;
+  min-height: 55vh;
+  border: none; outline: none; resize: none;
+  background: transparent; color: inherit;
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+  font-size: 0.92rem; line-height: 1.7;
+  padding: 0; margin: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  tab-size: 2;
+}
+.proyectos-md.hidden { display: none; }
+/* Un botón que en este modo no aplica se ve apagado, no desaparece:
+   así la barra no cambia de forma al cambiar de modo. */
+.proyectos-ribbon-btn.sin-modo { opacity: 0.35; cursor: not-allowed; }
 .proyectos-estilo-popover { min-width: 190px; }
 /* La fila de la pestaña "Página" reaprovecha el reparto de siempre. */
 .proyectos-page-toolbar {

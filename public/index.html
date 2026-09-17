@@ -550,6 +550,14 @@
             <button type="button" data-ribbon-tab="insertar" class="proyectos-ribbon-tab">Insertar</button>
             <button type="button" data-ribbon-tab="tabla" class="proyectos-ribbon-tab proyectos-ribbon-tab-contextual hidden">Tabla</button>
             <button type="button" data-ribbon-tab="pagina" class="proyectos-ribbon-tab">Página</button>
+            <div class="spacer"></div>
+            <!-- El VISUALIZADOR: el mismo documento visto como bloques
+                 (Word) o como texto (Markdown). Es un interruptor de dos
+                 posiciones, no dos botones sueltos. -->
+            <div class="proyectos-modo" id="proyectos-modo" title="Cómo quieres ver y escribir esta página">
+              <button type="button" data-modo="word" class="active">Word</button>
+              <button type="button" data-modo="markdown">Markdown</button>
+            </div>
           </div>
           <div class="proyectos-ribbon-panel" data-ribbon-panel="inicio"></div>
           <div class="proyectos-ribbon-panel hidden" data-ribbon-panel="insertar"></div>
@@ -613,6 +621,11 @@
                  popover flotante -- Koku pidio que estuviera integrado. -->
             <div id="proyectos-subnav" class="proyectos-subnav hidden"></div>
             <div id="proyectos-page-body" class="proyectos-page-body" contenteditable="true" data-placeholder="Escribe algo, o pulsa “/” para insertar un bloque…"></div>
+            <!-- El MISMO documento como texto Markdown. Se rellena al
+                 cambiar de modo; lo que se guarda sigue saliendo del
+                 cuerpo de arriba (ver proyectosVolcarMdAlCuerpo). -->
+            <textarea id="proyectos-md" class="proyectos-md hidden" spellcheck="false" placeholder="# Título
+Texto normal con **negrita**, *cursiva* y __subrayado__."></textarea>
           </div>
         </div>
       </section>

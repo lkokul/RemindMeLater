@@ -1,0 +1,145 @@
+# Errores encontrados y cómo se arreglaron
+
+Lo que sale del **forzado de errores** al cerrar cada fase: se le tiran
+a la herramienta casos rotos, hostiles o absurdos a propósito, y aquí se
+apunta lo que de verdad falló y qué se hizo.
+
+No están los fallos "de laboratorio" que salen mientras escribes el
+código y arreglas al momento: están los que **sobrevivieron** a la
+primera pasada y solo aparecieron al forzar.
+
+---
+
+## Fase 1 — Los dos modos de escribir (Word y Markdown)
+
+**Qué se probó**: 51 comprobaciones del viaje HTML → Markdown → HTML
+(bloque a bloque y con un documento entero), 57 casos de forzado
+(Markdown roto, HTML raro, texto que *parece* sintaxis), la barra
+funcionando en los dos modos, y la guía entera —contenido real, no
+inventado— pasando por el mismo viaje.
+
+### 1. Un enlace con `javascript:` se colaba en el documento · SEGURIDAD
+
+- **Qué pasaba**: escribiendo `[pincha](javascript:alert(1))` en modo
+  Markdown, el conversor generaba `<a href="javascript:alert(1)">` y lo
+  metía en el documento **vivo**. El saneador del servidor lo tiraba al
+  guardar, pero hasta entonces el enlace estaba ahí y se podía pulsar.
+  Lo mismo con `![x](javascript:...)` para las imágenes.
+- **Por qué se me pasó**: di por bueno que el saneador del backend era
+  la única puerta. Pero el backend solo mira lo que se **guarda**; el
+  conversor escribe directamente en la página.
+- **Solución**: el conversor lleva ahora la **misma lista blanca** que
+  el backend — un enlace solo sobrevive si empieza por `http://` o
+  `https://` (o es un `pagina:12` interno), y una imagen solo si apunta
+  a `/api/proyectos/images/…`. Lo que no encaja se queda en texto
+  suelto, sin enlace.
+- **Aviso**: esto toca las reglas de seguridad, así que queda dicho
+  aquí y no enterrado en un commit. La regla general que deja: **todo
+  sitio que escriba HTML en la página necesita su propia lista blanca**,
+  aunque el backend ya tenga la suya.
+
+### 2. Un recuadro de color se tragaba la cita que venía detrás
+
+- **Qué pasaba**: un callout seguido de una cita
+  (`> [!CONSEJO]` / `> texto` y luego `> otra cosa`) volvía como **un
+  solo** recuadro con los dos textos dentro. La cita desaparecía.
+- **Por qué**: el lector se comía *todas* las líneas que empezaran por
+  `>` después de la cabecera del alert, y no hay forma de distinguir
+  dónde acaba uno y empieza la otra.
+- **Solución**: un callout es **un bloque** en esta herramienta, así que
+  el lector consume **exactamente una** línea de cuerpo. Lo que venga
+  después es lo que diga: otra cita, otro alert o texto.
+
+### 3. Una lista de viñetas se comía la lista numerada de al lado
+
+- **Qué pasaba**: `<ul>…</ul><ol>…</ol>` seguidos volvían como **una
+  sola** lista de viñetas con todos los puntos dentro.
+- **Por qué**: al agrupar las líneas de lista se aceptaba cualquier
+  marca (`-` o `1.`) y luego se decidía el tipo mirando solo la
+  primera.
+- **Solución**: se agrupan solo líneas del **mismo tipo**. Dos listas
+  pegadas siguen siendo dos listas.
+
+### 4. Un `código` con comillas invertidas dentro salía partido
+
+- **Qué pasaba**: la propia guía explica la marca `` `código` ``, o sea
+  que su texto **lleva** comillas invertidas. Al convertir salía
+  `` ``código`` `` y al volver se leía como dos trozos de código vacíos
+  con el texto suelto en medio: `<code></code>código<code></code>`.
+- **Por qué**: se usaba siempre una comilla de valla, sin mirar lo que
+  había dentro.
+- **Solución**: la regla de CommonMark — la valla es **una comilla más
+  larga** que la racha más larga de dentro, con un espacio de respiro. Y
+  el lector entiende vallas de cualquier longitud.
+- **Detalle de propina**: las barras de escape **dentro** de un trozo de
+  código son literales, no escapes. Se deshacen los escapes *antes* de
+  devolver el código a su sitio.
+
+### 5. Un desplegable cerrado volvía abierto
+
+- **Qué pasaba**: `<details>` (plegado) volvía siempre como
+  `<details open>`.
+- **Por qué**: el estado no se guardaba en ningún sitio del texto.
+- **Solución**: se apunta con un `{cerrado}` al final de la directiva
+  (`::: desplegable Título {cerrado}`), que es la misma convención de
+  sufijos que ya se usaba para alinear.
+
+### 6. El bloque vacío del final de la página se perdía
+
+- **Qué pasaba**: una página que acababa en un bloque vacío (el hueco
+  donde sigues escribiendo) volvía sin él.
+- **Por qué**: al convertir se recortaban las líneas en blanco del
+  final, por "limpieza".
+- **Solución**: no se recortan. Un bloque vacío al final es un bloque
+  de verdad.
+
+### 7. Las comillas del texto volvían como `&quot;`
+
+- **Qué pasaba**: un texto con comillas dobles volvía escrito con
+  `&quot;`. Se **ve** igual, pero el documento ya no era el mismo.
+- **Por qué**: se usaba el mismo escapado para el texto y para los
+  atributos.
+- **Solución**: dos funciones distintas. En el **texto** solo se escapa
+  lo que rompe el HTML (`&`, `<`, `>`); en un **atributo** (`src`,
+  `href`) sí se escapan las comillas, o una dirección con comillas se
+  saldría del atributo.
+
+### 8. `app.js` se había vuelto "binario" para git
+
+- **Qué pasaba**: el conversor apartaba los trozos de código con una
+  marca interna que incluía el carácter **NUL**. Git y `grep` ven un NUL
+  y tratan el archivo como binario: se pierden los diffs de texto.
+- **Solución**: la marca pasa a ser `@@CODIGO0@@`. No se ve nunca (se
+  pone y se quita dentro de la misma función) y el archivo vuelve a ser
+  texto.
+
+---
+
+## Cosas que NO eran errores, y conviene tener apuntadas
+
+Dos "fallos" que salieron rojos y resultaron ser de la prueba, no del
+programa. Vale la pena dejarlos escritos porque volverán:
+
+- **Comparar HTML a pelo da falsos fallos.** El HTML de la guía está
+  escrito a mano y lleva un `>` crudo dentro de un diagrama; el
+  navegador, al escribir HTML, lo pone como `&gt;`. Son el mismo
+  documento. La comparación buena es **normalizando los dos lados por el
+  navegador** antes de compararlos.
+- **El modo elegido se recuerda en `localStorage`, que NO vive en la
+  carpeta de datos de la prueba.** Una prueba que acabe en modo Markdown
+  deja la siguiente arrancando en Markdown. Las pruebas ahora fijan el
+  modo a mano antes de empezar, en vez de dar por hecho el de fábrica.
+
+---
+
+## Lo que el forzado dejó claro que aguanta
+
+Por si sirve de tranquilidad, esto se probó y **no** rompió nada: texto
+que parece sintaxis (`# `, `- `, `> `, `|`, `:::`, `*`, `_`, `{`, `[`)
+escrito a propósito para engañar al lector; vallas de código sin cerrar;
+desplegables sin cerrar; directivas inventadas; tablas con filas
+desiguales; identificadores de base de datos absurdos; títulos de nueve
+almohadillas; líneas de 5.000 caracteres; documentos de 2.000 líneas;
+caracteres de control; HTML con `<script>` y `onerror`; pulsar los ~30
+botones de la barra seguidos sin cursor puesto; y ocho cambios de modo
+seguidos.

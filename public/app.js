@@ -10668,6 +10668,7 @@ async function openProyectosPage(id) {
   renderProyectosBreadcrumb();
   renderProyectosTree();
   renderProyectosSubnav(); // si esta desplegado, que enseñe las de ESTA pagina
+  proyectosSincronizarModo(); // deja la vista como toque: bloques o texto
 
   // Recordar que pagina esta abierta, para reabrirla al volver a la
   // vista (por dispositivo).
@@ -14211,6 +14212,850 @@ function openProyectosTemplatePopover(block, anchorEl = null) {
 }
 
 // ---------------------------------------------------------------------
+// LOS DOS MODOS DE ESCRIBIR: "Word" y "Markdown" (pedido por Koku)
+//
+// El MISMO documento, visto de dos maneras. Lo que se guarda en la base
+// NO cambia: sigue siendo el HTML de siempre, asi que el PDF, el
+// .rmproj, las bases de datos y todo lo demas siguen funcionando igual.
+// El Markdown es una VISTA (y una forma de escribir), no otro formato de
+// almacenamiento.
+//
+// LA REGLA QUE LO EXPLICA TODO: una linea = un bloque. No hay parrafos
+// que se juntan al escribir varias lineas seguidas, como en el Markdown
+// clasico: aqui cada linea del texto es un bloque de la pagina, igual
+// que en el modo Word. Eso hace que el viaje de ida y vuelta
+// (HTML -> Markdown -> HTML) sea EXACTO, que es lo unico que permite
+// cambiar de modo sin miedo a perder nada.
+//
+// Lo que Markdown no sabe decir por su cuenta (callouts de color,
+// alineacion, bases de datos, bloques de PDF, anchos de columna...) va
+// con dos convenciones propias, documentadas en la guia:
+//   - un sufijo {centro} / {derecha} / {justificado} al final de la linea
+//   - una "directiva" ::: nombre argumentos   (y ::: para cerrar las que
+//     llevan contenido dentro)
+// ---------------------------------------------------------------------
+
+// Alineacion: del atributo al sufijo y al reves.
+const MD_ALIGN_A_TEXTO = { center: 'centro', right: 'derecha', justify: 'justificado' };
+const MD_TEXTO_A_ALIGN = { centro: 'center', derecha: 'right', justificado: 'justify' };
+// Alineacion vertical de una celda.
+const MD_VALIGN_A_TEXTO = { middle: 'v-centro', bottom: 'v-abajo' };
+const MD_TEXTO_A_VALIGN = { 'v-centro': 'middle', 'v-abajo': 'bottom' };
+// Los alerts de color. Se ESCRIBEN en español, pero al leer se aceptan
+// tambien los ingleses de GitHub: asi un bloque copiado de un README
+// entra tal cual.
+const MD_KIND_A_TEXTO = { note: 'NOTA', tip: 'CONSEJO', important: 'IMPORTANTE', warning: 'AVISO', caution: 'PELIGRO' };
+const MD_TEXTO_A_KIND = {
+  NOTA: 'note', CONSEJO: 'tip', IMPORTANTE: 'important', AVISO: 'warning', PELIGRO: 'caution',
+  NOTE: 'note', TIP: 'tip', IMPORTANT: 'important', WARNING: 'warning', CAUTION: 'caution',
+};
+
+// Escapar lo que el Markdown se comeria al volver a leerlo. No se tocan
+// "<" ni ">": el "<br>" de un salto de linea dentro de un bloque viaja
+// tal cual (es la unica etiqueta que se deja pasar) y un ">" solo
+// significa cita al PRINCIPIO de la linea, donde ya se escapa aparte.
+function escaparMd(texto) {
+  return String(texto).replace(/([\\`*_[\]{}|])/g, '\\$1');
+}
+function desescaparMd(texto) {
+  return String(texto).replace(/\\([\\`*_[\]{}|])/g, '$1');
+}
+// Un texto que empieza por algo que el parser leeria como estructura
+// (#, -, >, |, :::) se protege con una barra.
+function escaparInicioDeLinea(linea) {
+  return linea.replace(/^(\s*)(#{1,3}\s|[-*]\s|\d+\.\s|>\s|\||:::)/, '$1\\$2');
+}
+
+// ----------------------- HTML -> Markdown ----------------------------
+
+// El contenido EN LINEA de un elemento (negritas, enlaces, codigo...).
+function proyectosInlineAMd(el) {
+  let out = '';
+  for (const n of el.childNodes) {
+    if (n.nodeType === Node.TEXT_NODE) { out += escaparMd(n.nodeValue); continue; }
+    if (n.nodeType !== Node.ELEMENT_NODE) continue;
+    const tag = n.tagName.toLowerCase();
+    const dentro = proyectosInlineAMd(n);
+    if (tag === 'br') { out += '<br>'; continue; }
+    if (tag === 'b' || tag === 'strong') { out += dentro.trim() ? '**' + dentro + '**' : ''; continue; }
+    if (tag === 'i' || tag === 'em') { out += dentro.trim() ? '*' + dentro + '*' : ''; continue; }
+    if (tag === 'u') { out += dentro.trim() ? '__' + dentro + '__' : ''; continue; }
+    if (tag === 's' || tag === 'strike') { out += dentro.trim() ? '~~' + dentro + '~~' : ''; continue; }
+    if (tag === 'code') {
+      // Si el propio texto lleva comillas invertidas (la guia las lleva,
+      // para explicar la marca), la valla tiene que ser MAS larga que la
+      // racha mas larga de dentro, con un espacio de respiro. Es la
+      // regla de CommonMark; sin ella la guia volvia rota.
+      const txt = n.textContent;
+      const mayor = (txt.match(/`+/g) || []).reduce((m, r) => Math.max(m, r.length), 0);
+      const valla = '`'.repeat(mayor + 1);
+      const aire = (txt.startsWith('`') || txt.endsWith('`')) ? ' ' : '';
+      out += valla + aire + txt + aire + valla;
+      continue;
+    }
+    if (tag === 'img') { out += '![](' + (n.getAttribute('src') || '') + ')'; continue; }
+    if (tag === 'a') {
+      const pagina = n.getAttribute('data-page-link');
+      const destino = pagina ? 'pagina:' + pagina : (n.getAttribute('href') || '');
+      out += '[' + dentro + '](' + destino + ')';
+      continue;
+    }
+    out += dentro;
+  }
+  return out;
+}
+
+// El sufijo de alineacion de un bloque ({centro} y compañia).
+function sufijoDeAlineacion(el) {
+  const marcas = [];
+  const a = el.getAttribute && el.getAttribute('data-align');
+  if (a && MD_ALIGN_A_TEXTO[a]) marcas.push(MD_ALIGN_A_TEXTO[a]);
+  const v = el.getAttribute && el.getAttribute('data-valign');
+  if (v && MD_VALIGN_A_TEXTO[v]) marcas.push(MD_VALIGN_A_TEXTO[v]);
+  return marcas.length ? ' {' + marcas.join(' ') + '}' : '';
+}
+
+// Una tabla -> filas de tuberias, con su directiva delante si lleva
+// cosas que el Markdown normal no sabe decir (anchos de columna, altos
+// de fila, ancho completo o que la primera fila NO sea cabecera).
+function tablaAMd(tabla, out) {
+  const filas = [...tabla.querySelectorAll('tr')];
+  if (!filas.length) return;
+  const opciones = [];
+  if (tabla.getAttribute('data-width') === 'full') opciones.push('ancho-completo');
+  const primeraEsCabecera = [...filas[0].children].every((c) => c.tagName === 'TH');
+  if (!primeraEsCabecera) opciones.push('sin-cabecera');
+  const anchos = [...tabla.querySelectorAll('colgroup col')]
+    .map((c) => (c.style.width || '').replace('px', '')).filter(Boolean);
+  if (anchos.length) opciones.push('anchos=' + anchos.join(','));
+  const altos = filas.map((tr) => (tr.style.height || '').replace('px', ''));
+  if (altos.some(Boolean)) opciones.push('altos=' + altos.join(','));
+  if (opciones.length) out.push('::: tabla ' + opciones.join(' '));
+
+  const celdaAMd = (c) => (proyectosInlineAMd(c).replace(/\|/g, '\\|').trim() + sufijoDeAlineacion(c)).trim() || ' ';
+  filas.forEach((tr, i) => {
+    out.push('| ' + [...tr.children].map(celdaAMd).join(' | ') + ' |');
+    if (i === 0) out.push('| ' + [...tr.children].map(() => '---').join(' | ') + ' |');
+  });
+}
+
+// Un bloque del documento -> sus lineas de Markdown.
+function proyectosBloqueAMd(el, out, sangria = '') {
+  if (el.nodeType === Node.TEXT_NODE) {
+    const t = el.nodeValue.trim();
+    if (t) out.push(sangria + escaparInicioDeLinea(escaparMd(t)));
+    return;
+  }
+  if (el.nodeType !== Node.ELEMENT_NODE) return;
+  const tag = el.tagName.toLowerCase();
+  const suf = sufijoDeAlineacion(el);
+
+  if (tag === 'hr') { out.push('---'); return; }
+  if (/^h[1-3]$/.test(tag)) { out.push('#'.repeat(Number(tag[1])) + ' ' + proyectosInlineAMd(el) + suf); return; }
+  if (tag === 'blockquote') { out.push('> ' + proyectosInlineAMd(el) + suf); return; }
+  if (tag === 'table') { tablaAMd(el, out); return; }
+  if (tag === 'figure') {
+    const img = el.querySelector('img');
+    const pie = el.querySelector('figcaption');
+    out.push('![' + (pie ? escaparMd(pie.textContent) : '') + '](' + (img ? img.getAttribute('src') : '') + ')');
+    return;
+  }
+  if (tag === 'pre') {
+    const lang = el.getAttribute('data-lang') || '';
+    out.push('```' + lang);
+    (plainProyectosCodeText(el.querySelector('code') || el) || '').split('\n').forEach((l) => out.push(l));
+    out.push('```');
+    return;
+  }
+  if (tag === 'ul' || tag === 'ol') {
+    let n = 1;
+    for (const li of el.children) {
+      if (li.tagName !== 'LI') continue;
+      const marca = tag === 'ol' ? (n++) + '.' : '-';
+      // El texto propio del li, sin las sublistas que cuelgan de el.
+      const propio = document.createElement('div');
+      for (const hijo of li.childNodes) {
+        if (hijo.nodeType === Node.ELEMENT_NODE && /^(ul|ol)$/i.test(hijo.tagName)) continue;
+        propio.appendChild(hijo.cloneNode(true));
+      }
+      out.push(sangria + marca + ' ' + proyectosInlineAMd(propio) + sufijoDeAlineacion(li));
+      for (const hijo of li.children) {
+        if (/^(ul|ol)$/i.test(hijo.tagName)) proyectosBloqueAMd(hijo, out, sangria + '  ');
+      }
+    }
+    return;
+  }
+  if (tag === 'details') {
+    const summary = el.querySelector(':scope > summary');
+    // Un desplegable puede estar plegado o desplegado, y eso es parte
+    // del documento: se apunta con un {cerrado} al final.
+    const cerrado = el.hasAttribute('open') ? '' : ' {cerrado}';
+    out.push(('::: desplegable ' + (summary ? proyectosInlineAMd(summary) : '')).trimEnd() + cerrado);
+    for (const hijo of el.children) {
+      if (hijo.tagName === 'SUMMARY') continue;
+      proyectosBloqueAMd(hijo, out, '');
+    }
+    out.push(':::');
+    return;
+  }
+  if (tag === 'div' || tag === 'p') {
+    const db = el.getAttribute('data-proyectos-db');
+    if (db) { out.push('::: base-de-datos ' + db); return; }
+    const pdf = el.getAttribute('data-pdf-block');
+    if (pdf) {
+      out.push({ toc: '::: indice', figures: '::: indice-de-figuras', pagebreak: '::: salto-de-pagina' }[pdf] || '');
+      return;
+    }
+    if (el.getAttribute('data-callout') === '1') {
+      const kind = el.getAttribute('data-kind');
+      const etiqueta = kind ? (MD_KIND_A_TEXTO[kind] || 'NOTA') : (el.getAttribute('data-icon') || '💬');
+      out.push('> [!' + etiqueta + ']');
+      out.push('> ' + proyectosInlineAMd(el) + suf);
+      return;
+    }
+    if (el.getAttribute('data-todo') === '1') {
+      const marca = el.getAttribute('data-done') === '1' ? 'x' : ' ';
+      const nivel = Number(el.getAttribute('data-indent')) || 0;
+      out.push('  '.repeat(nivel) + '- [' + marca + '] ' + proyectosInlineAMd(el) + suf);
+      return;
+    }
+    const dentro = proyectosInlineAMd(el);
+    // Un bloque vacio (<div><br></div>) es una linea en blanco.
+    if (dentro === '<br>' || dentro.trim() === '') { out.push(''); return; }
+    out.push(escaparInicioDeLinea(dentro) + suf);
+    return;
+  }
+  const texto = proyectosInlineAMd(el);
+  if (texto.trim()) out.push(escaparInicioDeLinea(texto) + suf);
+}
+
+// El cuerpo entero -> Markdown.
+function proyectosHtmlAMd(html) {
+  const cont = document.createElement('div');
+  cont.innerHTML = html || '';
+  const out = [];
+  for (const hijo of cont.childNodes) proyectosBloqueAMd(hijo, out);
+  // NO se recortan las lineas en blanco del final: un bloque vacio al
+  // final es un bloque de verdad (el hueco donde sigues escribiendo), y
+  // recortarlo lo borraba al cambiar de modo.
+  return out.join('\n');
+}
+
+// ----------------------- Markdown -> HTML ----------------------------
+
+// Escapa para meter texto en el HTML (el saneador del backend vuelve a
+// pasar por encima al guardar, esto es solo para no romper el DOM).
+// Para TEXTO: solo lo que rompe el HTML. Las comillas NO se tocan --
+// escaparlas cambiaba el documento sin motivo (un texto con comillas
+// volvia con &quot; y ya no era el mismo).
+function mdEscaparTexto(t) {
+  return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+// Para ATRIBUTOS (src, href): ahi las comillas SI hay que escaparlas, o
+// una direccion con comillas se saldria del atributo.
+function mdEscaparAtributo(t) {
+  return mdEscaparTexto(t).replace(/"/g, '&quot;');
+}
+
+// Saca el sufijo {centro} / {v-centro} del final de una linea y
+// devuelve el texto limpio + los atributos que toquen.
+function partirSufijo(texto) {
+  const m = String(texto).match(/\s*\{([a-z\- ]+)\}\s*$/i);
+  if (!m) return { texto, attrs: '' };
+  let attrs = '';
+  for (const marca of m[1].trim().toLowerCase().split(/\s+/)) {
+    if (MD_TEXTO_A_ALIGN[marca]) attrs += ' data-align="' + MD_TEXTO_A_ALIGN[marca] + '"';
+    else if (MD_TEXTO_A_VALIGN[marca]) attrs += ' data-valign="' + MD_TEXTO_A_VALIGN[marca] + '"';
+  }
+  return attrs ? { texto: texto.slice(0, m.index), attrs } : { texto, attrs: '' };
+}
+
+// El texto EN LINEA: negritas, cursivas, enlaces... Se trabaja sobre el
+// texto ya escapado para HTML, y los tramos de codigo `asi` se apartan
+// antes para que dentro no se interprete nada.
+function proyectosMdInlineAHtml(texto) {
+  const codigos = [];
+  // Vallas de una o varias comillas invertidas; si hay un espacio a
+  // cada lado se quita (es el respiro que se pone al escribirlas
+  // cuando el propio codigo lleva comillas dentro).
+  let t = String(texto).replace(/(`+)([\s\S]*?)\1/g, (_, valla, c) => {
+    const limpio = (c.startsWith(' ') && c.endsWith(' ') && c.trim()) ? c.slice(1, -1) : c;
+    codigos.push(limpio);
+    return '@@CODIGO' + (codigos.length - 1) + '@@';
+  });
+  t = mdEscaparTexto(t);
+  // Imagenes y enlaces ANTES que los enfasis (su texto puede llevarlos).
+  // MISMA lista blanca que el saneador del backend. Sin esto, escribir
+  // [pincha](javascript:...) en Markdown metia un enlace ejecutable en
+  // el documento vivo: el backend lo tiraba AL GUARDAR, pero hasta
+  // entonces estaba ahi y se podia pulsar. Lo encontro el forzado de
+  // errores de la Fase 1.
+  const destinoSeguro = (u) => /^https?:\/\//i.test(u);
+  const imagenSegura = (u) => /^\/api\/proyectos\/images\/[a-zA-Z0-9._-]+$/.test(u);
+  t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => (imagenSegura(src) ? '<img src="' + mdEscaparAtributo(src) + '">' : alt));
+  t = t.replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, (_, txt, destino) => {
+    const pagina = destino.match(/^pagina:(\d+)$/);
+    if (pagina) return '<a data-page-link="' + pagina[1] + '">' + txt + '</a>';
+    // Un destino que no es una direccion web se queda en texto suelto.
+    if (!destinoSeguro(destino)) return txt;
+    return '<a href="' + mdEscaparAtributo(destino) + '">' + txt + '</a>';
+  });
+  // Los enfasis, de mas largo a mas corto para que *** gane a ** y a *.
+  t = t.replace(/(^|[^\\*])\*\*\*(.+?)\*\*\*/g, '$1<b><i>$2</i></b>');
+  t = t.replace(/(^|[^\\*])\*\*(.+?)\*\*/g, '$1<b>$2</b>');
+  t = t.replace(/(^|[^\\*])\*(.+?)\*/g, '$1<i>$2</i>');
+  t = t.replace(/(^|[^\\_])__(.+?)__/g, '$1<u>$2</u>');
+  t = t.replace(/(^|[^\\~])~~(.+?)~~/g, '$1<s>$2</s>');
+  t = t.replace(/&lt;br&gt;/g, '<br>');
+  // Deshacer los escapes ANTES de devolver el codigo a su sitio: dentro
+  // de un `codigo` una barra invertida es literal, no un escape.
+  t = desescaparMd(t);
+  return t.replace(/@@CODIGO(\d+)@@/g, (_, i) => '<code>' + mdEscaparTexto(codigos[Number(i)]) + '</code>');
+}
+
+// ¿Cuantos niveles de sangria lleva esta linea? (2 espacios = 1 nivel)
+const nivelDeSangria = (linea) => Math.floor((linea.match(/^ */)[0].length) / 2);
+
+function proyectosMdAHtml(md) {
+  const lineas = String(md == null ? '' : md).replace(/\r/g, '').split('\n');
+  const out = [];
+  let i = 0;
+
+  const bloqueVacio = () => '<div><br></div>';
+
+  while (i < lineas.length) {
+    const cruda = lineas[i];
+    const linea = cruda.trimEnd();
+    const sinSangria = linea.trim();
+
+    // --- Bloque de codigo con vallas ---
+    if (/^```/.test(sinSangria)) {
+      const lang = sinSangria.slice(3).trim();
+      const cuerpo = [];
+      i++;
+      while (i < lineas.length && !/^```/.test(lineas[i].trim())) { cuerpo.push(lineas[i]); i++; }
+      i++; // la valla de cierre
+      const attrLang = /^[a-zA-Z0-9+#.-]{0,20}$/.test(lang) && lang ? ' data-lang="' + lang + '"' : '';
+      out.push('<pre' + attrLang + '><code>' + mdEscaparTexto(cuerpo.join('\n')) + '</code></pre>');
+      continue;
+    }
+
+    // --- Directivas ::: ---
+    if (/^:::/.test(sinSangria)) {
+      const resto = sinSangria.slice(3).trim();
+      const [nombre, ...args] = resto.split(/\s+/);
+      if (nombre === 'base-de-datos' && /^\d{1,10}$/.test(args[0] || '')) {
+        out.push('<div data-proyectos-db="' + args[0] + '"></div>');
+        i++; continue;
+      }
+      if (nombre === 'indice') { out.push('<div data-pdf-block="toc"></div>'); i++; continue; }
+      if (nombre === 'indice-de-figuras') { out.push('<div data-pdf-block="figures"></div>'); i++; continue; }
+      if (nombre === 'salto-de-pagina') { out.push('<div data-pdf-block="pagebreak"></div>'); i++; continue; }
+      if (nombre === 'desplegable') {
+        let titulo = args.join(' ');
+        const plegado = /\s*\{cerrado\}\s*$/i.test(titulo);
+        if (plegado) titulo = titulo.replace(/\s*\{cerrado\}\s*$/i, '');
+        const dentro = [];
+        i++;
+        while (i < lineas.length && lineas[i].trim() !== ':::') { dentro.push(lineas[i]); i++; }
+        i++; // el ::: de cierre
+        const cuerpo = proyectosMdAHtml(dentro.join('\n')) || bloqueVacio();
+        out.push('<details' + (plegado ? '' : ' open') + '><summary>' + proyectosMdInlineAHtml(titulo) + '</summary>' + cuerpo + '</details>');
+        continue;
+      }
+      if (nombre === 'tabla') {
+        // Las opciones se aplican a la tabla que viene justo detras.
+        const opciones = args.join(' ');
+        i++;
+        const tabla = leerTabla(lineas, i, opciones);
+        if (tabla) { out.push(tabla.html); i = tabla.i; continue; }
+        continue;
+      }
+      // Directiva desconocida: se queda como texto, para no perderla.
+      out.push('<div>' + mdEscaparTexto(linea) + '</div>');
+      i++; continue;
+    }
+
+    // --- Callout / alert ---
+    const alerta = sinSangria.match(/^>\s*\[!([^\]]+)\]\s*$/);
+    if (alerta) {
+      const etiqueta = alerta[1].trim();
+      const kind = MD_TEXTO_A_KIND[etiqueta.toUpperCase()];
+      // SOLO la linea siguiente: un callout de esta herramienta es UN
+      // bloque, siempre. Comiendose todas las lineas ">" seguidas, una
+      // cita escrita justo debajo del callout desaparecia dentro de el
+      // (lo encontro el forzado de errores).
+      i++;
+      let cuerpoCallout = '';
+      if (i < lineas.length && /^\s*>/.test(lineas[i]) && !/^\s*>\s*\[!/.test(lineas[i])) {
+        cuerpoCallout = lineas[i].replace(/^\s*>\s?/, '');
+        i++;
+      }
+      const { texto, attrs } = partirSufijo(cuerpoCallout.trim());
+      const marca = kind
+        ? ' data-kind="' + kind + '"'
+        : (/["'<>&]/.test(etiqueta) ? '' : ' data-icon="' + etiqueta.slice(0, 8) + '"');
+      out.push('<div data-callout="1"' + marca + attrs + '>' + proyectosMdInlineAHtml(texto) + '</div>');
+      continue;
+    }
+
+    // --- Cita ---
+    if (/^>\s?/.test(sinSangria)) {
+      const { texto, attrs } = partirSufijo(sinSangria.replace(/^>\s?/, ''));
+      out.push('<blockquote' + attrs + '>' + proyectosMdInlineAHtml(texto) + '</blockquote>');
+      i++; continue;
+    }
+
+    // --- Divisor ---
+    if (/^(---|\*\*\*|___)$/.test(sinSangria)) { out.push('<hr>'); i++; continue; }
+
+    // --- Titulos ---
+    const titulo = sinSangria.match(/^(#{1,3})\s+(.*)$/);
+    if (titulo) {
+      const n = titulo[1].length;
+      const { texto, attrs } = partirSufijo(titulo[2]);
+      out.push('<h' + n + attrs + '>' + proyectosMdInlineAHtml(texto) + '</h' + n + '>');
+      i++; continue;
+    }
+
+    // --- Tareas (con su sangria) ---
+    const tarea = cruda.match(/^(\s*)-\s+\[([ xX])\]\s*(.*)$/);
+    if (tarea) {
+      const nivel = Math.min(6, nivelDeSangria(cruda));
+      const { texto, attrs } = partirSufijo(tarea[3]);
+      out.push('<div data-todo="1" data-done="' + (tarea[2].toLowerCase() === 'x' ? '1' : '0') + '"'
+        + (nivel > 0 ? ' data-indent="' + nivel + '"' : '') + attrs + '>'
+        + (proyectosMdInlineAHtml(texto) || '<br>') + '</div>');
+      i++; continue;
+    }
+
+    // --- Listas (agrupando las lineas seguidas, con anidamiento) ---
+    if (/^\s*([-*]|\d+\.)\s+/.test(cruda)) {
+      // Solo se agrupan lineas del MISMO tipo: una lista de viñetas
+      // pegada a una numerada son DOS listas, no una (si no, la
+      // numerada se comia dentro de la de viñetas).
+      const ordenada = /^\s*\d+\.\s+/.test(cruda);
+      const mismoTipo = (l) => (/^\s*\d+\.\s+/.test(l) === ordenada);
+      const trozo = [];
+      while (i < lineas.length && /^\s*([-*]|\d+\.)\s+/.test(lineas[i])
+             && mismoTipo(lineas[i]) && !/^\s*-\s+\[[ xX]\]/.test(lineas[i])) {
+        trozo.push(lineas[i]); i++;
+      }
+      out.push(listaAHtml(trozo, 0).html);
+      continue;
+    }
+
+    // --- Tabla suelta (sin directiva delante) ---
+    if (/^\s*\|/.test(cruda)) {
+      const tabla = leerTabla(lineas, i, '');
+      if (tabla) { out.push(tabla.html); i = tabla.i; continue; }
+    }
+
+    // --- Una imagen SOLA en su linea ---
+    // Con texto entre los corchetes es una FIGURA con pie de foto (la
+    // que se numera al exportar a PDF); sin el, una imagen normal.
+    const imagenSola = sinSangria.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
+    if (imagenSola) {
+      const pie = imagenSola[1].trim();
+      if (pie) {
+        out.push('<figure><img src="' + mdEscaparAtributo(imagenSola[2]) + '"><figcaption>'
+          + proyectosMdInlineAHtml(pie) + '</figcaption></figure>');
+      } else {
+        out.push('<div><img src="' + mdEscaparAtributo(imagenSola[2]) + '"></div>');
+      }
+      i++; continue;
+    }
+
+    // --- Linea en blanco = bloque vacio ---
+    if (sinSangria === '') { out.push(bloqueVacio()); i++; continue; }
+
+    // --- Texto normal ---
+    const { texto, attrs } = partirSufijo(linea);
+    const cuerpo = proyectosMdInlineAHtml(texto.replace(/^\\/, ''));
+    out.push('<div' + attrs + '>' + (cuerpo || '<br>') + '</div>');
+    i++;
+  }
+
+  return out.join('');
+}
+
+// Un grupo de lineas de lista -> <ul>/<ol> anidados.
+function listaAHtml(lineas, nivel) {
+  const ordenada = /^\s*\d+\./.test(lineas[0] || '');
+  let html = ordenada ? '<ol>' : '<ul>';
+  let i = 0;
+  while (i < lineas.length) {
+    const l = lineas[i];
+    const miNivel = nivelDeSangria(l);
+    if (miNivel > nivel) {
+      // Sublista: se la come el <li> anterior.
+      const dentro = [];
+      while (i < lineas.length && nivelDeSangria(lineas[i]) > nivel) { dentro.push(lineas[i]); i++; }
+      const sub = listaAHtml(dentro, nivel + 1);
+      html = html.replace(/<\/li>$/, sub.html + '</li>');
+      continue;
+    }
+    const m = l.match(/^\s*(?:[-*]|\d+\.)\s+(.*)$/);
+    if (!m) { i++; continue; }
+    const { texto, attrs } = partirSufijo(m[1]);
+    html += '<li' + attrs + '>' + (proyectosMdInlineAHtml(texto) || '<br>') + '</li>';
+    i++;
+  }
+  html += ordenada ? '</ol>' : '</ul>';
+  return { html };
+}
+
+// Lee una tabla de tuberias a partir de la linea `i`. `opciones` viene
+// de la directiva ::: tabla (anchos, altos, sin-cabecera...).
+function leerTabla(lineas, i, opciones) {
+  const filas = [];
+  while (i < lineas.length && /^\s*\|/.test(lineas[i])) {
+    const celdas = lineas[i].trim().replace(/^\|/, '').replace(/\|$/, '')
+      .split(/(?<!\\)\|/).map((c) => c.trim());
+    // La fila de guiones (|---|---|) solo separa; no es contenido.
+    if (!celdas.every((c) => /^:?-{2,}:?$/.test(c))) filas.push(celdas);
+    i++;
+  }
+  if (!filas.length) return null;
+
+  const sinCabecera = / sin-cabecera(\s|$)/.test(' ' + opciones);
+  const anchoCompleto = / ancho-completo(\s|$)/.test(' ' + opciones);
+  const anchos = (opciones.match(/anchos=([\d,.]+)/) || [])[1];
+  const altos = (opciones.match(/altos=([\d,.]*)/) || [])[1];
+
+  let html = '<table' + (anchoCompleto ? ' data-width="full"' : '') + '>';
+  if (anchos) {
+    html += '<colgroup>' + anchos.split(',').map((w) => (w ? '<col style="width:' + Number(w) + 'px">' : '<col>')).join('') + '</colgroup>';
+  }
+  html += '<tbody>';
+  const listaAltos = altos ? altos.split(',') : [];
+  filas.forEach((celdas, f) => {
+    const alto = listaAltos[f];
+    html += '<tr' + (alto ? ' style="height:' + Number(alto) + 'px"' : '') + '>';
+    for (const celda of celdas) {
+      const etiqueta = (f === 0 && !sinCabecera) ? 'th' : 'td';
+      const { texto, attrs } = partirSufijo(celda.replace(/\\\|/g, '|'));
+      html += '<' + etiqueta + attrs + '>' + (proyectosMdInlineAHtml(texto) || '<br>') + '</' + etiqueta + '>';
+    }
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  return { html, i };
+}
+
+// ------------------- El cambio de modo y su interfaz -----------------
+
+// 'word' = el editor de bloques de siempre; 'markdown' = el mismo
+// documento como texto. Es una preferencia de ESTE dispositivo.
+let proyectosModo = 'word';
+let proyectosMdComoEntro = '';   // para saber si de verdad se ha tocado
+let proyectosMdSaveTimer = null;
+
+const proyectosMdArea = () => document.getElementById('proyectos-md');
+
+// Vuelca el Markdown de la caja al cuerpo (oculto) y lo guarda. El
+// cuerpo sigue siendo la UNICA fuente de lo que se guarda, asi que el
+// resto de la app (PDF, .rmproj, bases de datos) no se entera de que
+// existe otro modo.
+function proyectosVolcarMdAlCuerpo({ rehidratar = false } = {}) {
+  const area = proyectosMdArea();
+  if (!area) return;
+  PROYECTOS_BODY().innerHTML = proyectosMdAHtml(area.value);
+  ensureProyectosBodyBlocks();
+  if (rehidratar) {
+    hydrateProyectosDbBlocks();
+    hydrateProyectosPdfBlocks();
+    highlightProyectosCodeBlocks();
+    renderProyectosDiagrams();
+    // (los pies de foto no necesitan hidratacion: son <figure> normales)
+  }
+  queueProyectosSaveBody();
+}
+
+// Rellena la caja de Markdown con lo que haya ahora en el cuerpo.
+function proyectosRegenerarMd() {
+  const area = proyectosMdArea();
+  if (!area) return;
+  area.value = proyectosHtmlAMd(getProyectosBodyHtml());
+  proyectosMdComoEntro = area.value;
+  ajustarAltoDeLaCajaMd();
+}
+
+function ajustarAltoDeLaCajaMd() {
+  const area = proyectosMdArea();
+  if (!area || area.classList.contains('hidden')) return;
+  area.style.height = 'auto';
+  area.style.height = Math.max(320, area.scrollHeight + 8) + 'px';
+}
+
+function proyectosCambiarModo(modo) {
+  const area = proyectosMdArea();
+  const body = PROYECTOS_BODY();
+  if (!area || !body) return;
+  if (modo === proyectosModo) return;
+
+  if (modo === 'markdown') {
+    proyectosRegenerarMd();
+    body.classList.add('hidden');
+    area.classList.remove('hidden');
+    ajustarAltoDeLaCajaMd();
+  } else {
+    // Si el texto NO se ha tocado, se deja el HTML original tal cual:
+    // asi cambiar de modo para mirar no reescribe nada (y no se pierde
+    // ningun detalle que el Markdown no supiera decir).
+    if (area.value !== proyectosMdComoEntro) proyectosVolcarMdAlCuerpo({ rehidratar: true });
+    area.classList.add('hidden');
+    body.classList.remove('hidden');
+  }
+  proyectosModo = modo;
+  try { localStorage.setItem('proyectosModoEscritura', modo); } catch (err) { /* sin guardar */ }
+  actualizarBotonDeModo();
+  refrescarCintaProyectos();
+}
+
+function actualizarBotonDeModo() {
+  document.querySelectorAll('#proyectos-modo [data-modo]').forEach((b) => {
+    b.classList.toggle('active', b.getAttribute('data-modo') === proyectosModo);
+  });
+}
+
+// Al abrir/cambiar de pagina hay que dejar la vista de acuerdo con el
+// modo activo (el cuerpo ya viene relleno por openProyectosPage).
+function proyectosSincronizarModo() {
+  const area = proyectosMdArea();
+  const body = PROYECTOS_BODY();
+  if (!area || !body) return;
+  if (proyectosModo === 'markdown') {
+    proyectosRegenerarMd();
+    body.classList.add('hidden');
+    area.classList.remove('hidden');
+    ajustarAltoDeLaCajaMd();
+  } else {
+    area.classList.add('hidden');
+    body.classList.remove('hidden');
+  }
+  actualizarBotonDeModo();
+}
+
+// ---------------- Escribir Markdown: utilidades de la caja ------------
+
+// Lo seleccionado ahora mismo en la caja.
+function mdSeleccion() {
+  const area = proyectosMdArea();
+  return { area, ini: area.selectionStart, fin: area.selectionEnd, texto: area.value.slice(area.selectionStart, area.selectionEnd) };
+}
+// Sustituye un tramo y deja el cursor donde se le diga.
+function mdReemplazar(ini, fin, texto, selIni = null, selFin = null) {
+  const area = proyectosMdArea();
+  area.setRangeText(texto, ini, fin, 'end');
+  if (selIni !== null) area.setSelectionRange(selIni, selFin === null ? selIni : selFin);
+  area.focus();
+  mdCambiado();
+}
+// Envuelve lo seleccionado con una marca (y lo quita si ya la tiene).
+function mdEnvolver(marca) {
+  const { area, ini, fin, texto } = mdSeleccion();
+  const antes = area.value.slice(Math.max(0, ini - marca.length), ini);
+  const despues = area.value.slice(fin, fin + marca.length);
+  if (antes === marca && despues === marca) {
+    mdReemplazar(ini - marca.length, fin + marca.length, texto, ini - marca.length, fin - marca.length);
+    return;
+  }
+  if (texto.startsWith(marca) && texto.endsWith(marca) && texto.length >= marca.length * 2) {
+    const limpio = texto.slice(marca.length, -marca.length);
+    mdReemplazar(ini, fin, limpio, ini, ini + limpio.length);
+    return;
+  }
+  mdReemplazar(ini, fin, marca + texto + marca, ini + marca.length, fin + marca.length);
+}
+// El tramo de lineas completas que toca la seleccion.
+function mdLineasTocadas() {
+  const area = proyectosMdArea();
+  const ini = area.value.lastIndexOf('\n', area.selectionStart - 1) + 1;
+  let fin = area.value.indexOf('\n', area.selectionEnd);
+  if (fin === -1) fin = area.value.length;
+  return { ini, fin, texto: area.value.slice(ini, fin) };
+}
+// Pone (o quita) un prefijo en todas las lineas tocadas.
+function mdPrefijoDeLinea(prefijo, { numerada = false } = {}) {
+  const { ini, fin, texto } = mdLineasTocadas();
+  const lineas = texto.split('\n');
+  const patron = /^(\s*)((#{1,3}|>|-|\*|\d+\.)\s+(\[[ xX]\]\s*)?)?/;
+  const todasLoTienen = lineas.every((l) => {
+    const cuerpo = l.replace(/^\s*/, '');
+    return numerada ? /^\d+\.\s/.test(cuerpo) : cuerpo.startsWith(prefijo);
+  });
+  const nuevas = lineas.map((l, n) => {
+    const sangria = l.match(/^\s*/)[0];
+    const limpia = l.replace(patron, '$1').replace(/^\s*/, '');
+    if (todasLoTienen) return sangria + limpia;
+    return sangria + (numerada ? (n + 1) + '. ' : prefijo) + limpia;
+  });
+  mdReemplazar(ini, fin, nuevas.join('\n'), ini, ini + nuevas.join('\n').length);
+}
+// Pone o quita el sufijo {centro} y compañia.
+function mdSufijoAlineacion(marca) {
+  const { ini, fin, texto } = mdLineasTocadas();
+  const nuevas = texto.split('\n').map((l) => {
+    const limpia = l.replace(/\s*\{[a-z\- ]+\}\s*$/i, '');
+    return marca ? limpia + ' {' + marca + '}' : limpia;
+  });
+  mdReemplazar(ini, fin, nuevas.join('\n'), ini, ini + nuevas.join('\n').length);
+}
+// Mete texto donde este el cursor, en su propia linea si hace falta.
+function mdInsertarBloque(texto) {
+  const area = proyectosMdArea();
+  const { ini, fin } = mdLineasTocadas();
+  const vacia = area.value.slice(ini, fin).trim() === '';
+  const trozo = vacia ? texto : '\n' + texto;
+  const desde = vacia ? ini : fin;
+  const hasta = vacia ? fin : fin;
+  mdReemplazar(desde, hasta, trozo, desde + trozo.length);
+}
+// Sangrar / quitar sangria en Markdown = dos espacios por nivel.
+function mdSangrar(hacia) {
+  const { ini, fin, texto } = mdLineasTocadas();
+  const nuevas = texto.split('\n').map((l) => (hacia > 0 ? '  ' + l : l.replace(/^ {1,2}/, '')));
+  mdReemplazar(ini, fin, nuevas.join('\n'), ini, ini + nuevas.join('\n').length);
+}
+// Quitar el formato de lo seleccionado (las marcas de enfasis).
+function mdLimpiarFormato() {
+  const { ini, fin, texto } = mdSeleccion();
+  const limpio = texto
+    .replace(/\*\*\*(.+?)\*\*\*/g, '$1').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1').replace(/~~(.+?)~~/g, '$1').replace(/`([^`]*)`/g, '$1');
+  mdReemplazar(ini, fin, limpio, ini, ini + limpio.length);
+}
+
+// Se ha tocado el texto: guardar (con retraso) y recolocar el alto.
+function mdCambiado() {
+  ajustarAltoDeLaCajaMd();
+  if (proyectosMdSaveTimer) clearTimeout(proyectosMdSaveTimer);
+  proyectosMdSaveTimer = setTimeout(() => {
+    proyectosMdSaveTimer = null;
+    if (proyectosModo === 'markdown') proyectosVolcarMdAlCuerpo();
+  }, 600);
+}
+
+
+// --------- Los botones "con dialogo" en modo Markdown ---------------
+
+// Enlace: envuelve lo seleccionado como [texto](destino) y deja el
+// cursor dentro del destino para escribirlo.
+function mdEnvolverEnlace(prefijo) {
+  const { ini, fin, texto } = mdSeleccion();
+  const cuerpo = '[' + (texto || 'texto') + '](' + prefijo + ')';
+  const posDestino = ini + cuerpo.length - 1;
+  mdReemplazar(ini, fin, cuerpo, posDestino, posDestino);
+}
+
+// Base de datos: se crea de verdad (como en modo Word) y se inserta su
+// marcador. La tabla vive en la base; el texto solo la referencia.
+async function mdInsertarBaseDeDatos() {
+  if (!proyectosCurrentPage) return;
+  try {
+    const data = await api('/api/proyectos-databases', {
+      method: 'POST',
+      body: JSON.stringify({ pageId: proyectosCurrentPage.id, name: '' }),
+    });
+    proyectosDbCache.set(data.id, data);
+    mdInsertarBloque('::: base-de-datos ' + data.id);
+  } catch (err) {
+    showAppAlert('No se pudo crear la base de datos: ' + err.message);
+  }
+}
+
+// Imagen: el mismo selector de archivo de siempre; lo que cambia es que
+// se inserta la marca de Markdown en vez de un <img>.
+function mdInsertarImagen() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    try {
+      const { url } = await api('/api/proyectos/images', {
+        method: 'POST',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+      mdInsertarBloque('![](' + url + ')');
+    } catch (err) {
+      showAppAlert('No se pudo subir la imagen: ' + err.message);
+    }
+  });
+  input.click();
+}
+
+// El desplegable "Estilo" en modo Markdown: cambia el prefijo de la
+// linea (o la mete en vallas, si es codigo).
+function mdEstiloDeParrafo(id) {
+  if (id === 'code') { mdInsertarBloque('```\n\n```'); return; }
+  const prefijos = { text: '', h1: '# ', h2: '## ', h3: '### ', quote: '> ' };
+  const { ini, fin, texto } = mdLineasTocadas();
+  const nuevas = texto.split('\n').map((l) => {
+    const sangria = l.match(/^\s*/)[0];
+    const limpia = l.replace(/^\s*(#{1,3}\s+|>\s+|[-*]\s+(\[[ xX]\]\s*)?|\d+\.\s+)?/, '');
+    return sangria + (prefijos[id] || '') + limpia;
+  });
+  mdReemplazar(ini, fin, nuevas.join('\n'), ini, ini + nuevas.join('\n').length);
+}
+
+// --------------- La caja: atajos de teclado y guardado ---------------
+
+(function conectarLaCajaDeMarkdown() {
+  const area = proyectosMdArea();
+  if (!area) return;
+
+  area.addEventListener('input', () => mdCambiado());
+
+  area.addEventListener('keydown', (e) => {
+    // Tab = dos espacios (sangria), Mayus+Tab los quita. Sin esto el
+    // foco se iria a otro control, como pasaba en el modo Word.
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      mdSangrar(e.shiftKey ? -1 : 1);
+      return;
+    }
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const tecla = e.key.toLowerCase();
+    // Los MISMOS atajos que en modo Word, escribiendo la marca.
+    const envolver = { b: '**', i: '*', u: '__' }[tecla];
+    if (envolver) { e.preventDefault(); mdEnvolver(envolver); return; }
+    const alinear = { q: null, t: 'centro', d: 'derecha', j: 'justificado' };
+    if (tecla in alinear && !e.shiftKey) { e.preventDefault(); mdSufijoAlineacion(alinear[tecla]); return; }
+    if (tecla === 'k') { e.preventDefault(); mdEnvolverEnlace('https://'); }
+  });
+
+  // Al salir de la caja, volcar ya (sin esperar al retraso): si se
+  // cierra la pagina justo despues, no se pierde lo ultimo escrito.
+  area.addEventListener('blur', () => {
+    if (proyectosModo !== 'markdown') return;
+    if (proyectosMdSaveTimer) { clearTimeout(proyectosMdSaveTimer); proyectosMdSaveTimer = null; }
+    proyectosVolcarMdAlCuerpo();
+  });
+})();
+
+// El interruptor Word / Markdown.
+(function conectarElInterruptorDeModo() {
+  const caja = document.getElementById('proyectos-modo');
+  if (!caja) return;
+  caja.addEventListener('mousedown', (e) => e.preventDefault()); // no robar el cursor
+  caja.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-modo]');
+    if (!btn) return;
+    proyectosCambiarModo(btn.getAttribute('data-modo'));
+  });
+  // La preferencia de este dispositivo, recordada entre sesiones.
+  try {
+    const guardado = localStorage.getItem('proyectosModoEscritura');
+    if (guardado === 'markdown' || guardado === 'word') proyectosModo = guardado;
+  } catch (err) { /* sin recordar */ }
+  actualizarBotonDeModo();
+})();
+
+// ---------------------------------------------------------------------
 // BARRA DE HERRAMIENTAS estilo Word (pedida por Koku: "los atajos de
 // teclado están muy bien, pero una herramienta visual puede ayudar
 // mucho... no hace falta que esté todo en el mismo menú").
@@ -14356,57 +15201,57 @@ function proyectosCintaDefinicion() {
     inicio: [
       [{ tipo: 'estilo' }],
       [
-        { id: 'negrita', texto: 'N', clase: 'es-negrita', title: 'Negrita (Ctrl+B)', cmd: 'bold', accion: () => proyectosComandoDeFormato('bold') },
-        { id: 'cursiva', texto: 'K', clase: 'es-cursiva', title: 'Cursiva (Ctrl+I)', cmd: 'italic', accion: () => proyectosComandoDeFormato('italic') },
-        { id: 'subrayado', texto: 'S', clase: 'es-subrayado', title: 'Subrayado (Ctrl+U)', cmd: 'underline', accion: () => proyectosComandoDeFormato('underline') },
-        { id: 'tachado', texto: 'ab', clase: 'es-tachado', title: 'Tachado', cmd: 'strikeThrough', accion: () => proyectosComandoDeFormato('strikeThrough') },
-        { id: 'limpiar', svg: 'eraser', title: 'Quitar el formato del texto seleccionado', accion: () => proyectosComandoDeFormato('removeFormat') },
+        { id: 'negrita', texto: 'N', clase: 'es-negrita', title: 'Negrita (Ctrl+B)', cmd: 'bold', accion: () => proyectosComandoDeFormato('bold'), md: () => mdEnvolver('**') },
+        { id: 'cursiva', texto: 'K', clase: 'es-cursiva', title: 'Cursiva (Ctrl+I)', cmd: 'italic', accion: () => proyectosComandoDeFormato('italic'), md: () => mdEnvolver('*') },
+        { id: 'subrayado', texto: 'S', clase: 'es-subrayado', title: 'Subrayado (Ctrl+U)', cmd: 'underline', accion: () => proyectosComandoDeFormato('underline'), md: () => mdEnvolver('__') },
+        { id: 'tachado', texto: 'ab', clase: 'es-tachado', title: 'Tachado', cmd: 'strikeThrough', accion: () => proyectosComandoDeFormato('strikeThrough'), md: () => mdEnvolver('~~') },
+        { id: 'limpiar', svg: 'eraser', title: 'Quitar el formato del texto seleccionado', accion: () => proyectosComandoDeFormato('removeFormat'), md: () => mdLimpiarFormato() },
       ],
       [
-        { id: 'align-left', svg: 'alignLeft', title: 'Alinear a la izquierda (Ctrl+Q)', align: 'left', accion: () => aplicarAlineacionProyectos('left') },
-        { id: 'align-center', svg: 'alignCenter', title: 'Centrar (Ctrl+T)', align: 'center', accion: () => aplicarAlineacionProyectos('center') },
-        { id: 'align-right', svg: 'alignRight', title: 'Alinear a la derecha (Ctrl+D)', align: 'right', accion: () => aplicarAlineacionProyectos('right') },
-        { id: 'align-justify', svg: 'alignJustify', title: 'Justificar (Ctrl+J)', align: 'justify', accion: () => aplicarAlineacionProyectos('justify') },
+        { id: 'align-left', svg: 'alignLeft', title: 'Alinear a la izquierda (Ctrl+Q)', align: 'left', accion: () => aplicarAlineacionProyectos('left'), md: () => mdSufijoAlineacion(null) },
+        { id: 'align-center', svg: 'alignCenter', title: 'Centrar (Ctrl+T)', align: 'center', accion: () => aplicarAlineacionProyectos('center'), md: () => mdSufijoAlineacion('centro') },
+        { id: 'align-right', svg: 'alignRight', title: 'Alinear a la derecha (Ctrl+D)', align: 'right', accion: () => aplicarAlineacionProyectos('right'), md: () => mdSufijoAlineacion('derecha') },
+        { id: 'align-justify', svg: 'alignJustify', title: 'Justificar (Ctrl+J)', align: 'justify', accion: () => aplicarAlineacionProyectos('justify'), md: () => mdSufijoAlineacion('justificado') },
       ],
       [
-        { id: 'bullet', svg: 'listBullet', title: 'Lista de viñetas', accion: bloque('bullet') },
-        { id: 'numbered', svg: 'listNumbered', title: 'Lista numerada', accion: bloque('numbered') },
-        { id: 'todo', svg: 'listTodo', title: 'Lista de tareas', accion: bloque('todo') },
-        { id: 'outdent', svg: 'outdent', title: 'Quitar sangría (Mayús+Tab)', accion: () => proyectosSangrar(-1) },
-        { id: 'indent', svg: 'indent', title: 'Aumentar sangría (Tab)', accion: () => proyectosSangrar(1) },
+        { id: 'bullet', svg: 'listBullet', title: 'Lista de viñetas', accion: bloque('bullet'), md: () => mdPrefijoDeLinea('- ') },
+        { id: 'numbered', svg: 'listNumbered', title: 'Lista numerada', accion: bloque('numbered'), md: () => mdPrefijoDeLinea('1. ', { numerada: true }) },
+        { id: 'todo', svg: 'listTodo', title: 'Lista de tareas', accion: bloque('todo'), md: () => mdPrefijoDeLinea('- [ ] ') },
+        { id: 'outdent', svg: 'outdent', title: 'Quitar sangría (Mayús+Tab)', accion: () => proyectosSangrar(-1), md: () => mdSangrar(-1) },
+        { id: 'indent', svg: 'indent', title: 'Aumentar sangría (Tab)', accion: () => proyectosSangrar(1), md: () => mdSangrar(1) },
       ],
     ],
     insertar: [
       [
-        { id: 'ins-table', svg: 'table', title: 'Tabla', accion: bloque('table') },
-        { id: 'ins-image', svg: 'image', title: 'Imagen', accion: bloque('image') },
-        { id: 'ins-divider', svg: 'divider', title: 'Divisor', accion: bloque('divider') },
-        { id: 'ins-quote', svg: 'quote', title: 'Cita', accion: bloque('quote') },
-        { id: 'ins-code', svg: 'code', title: 'Bloque de código', accion: bloque('code') },
-        { id: 'ins-diagram', svg: 'diagram', title: 'Diagrama (Mermaid)', accion: bloque('diagram') },
-        { id: 'ins-toggle', svg: 'toggleBlock', title: 'Desplegable', accion: bloque('toggle') },
+        { id: 'ins-table', svg: 'table', title: 'Tabla', accion: bloque('table'), md: () => mdInsertarBloque('| Columna 1 | Columna 2 |\n| --- | --- |\n|  |  |') },
+        { id: 'ins-image', svg: 'image', title: 'Imagen', accion: bloque('image'), md: () => mdInsertarImagen() },
+        { id: 'ins-divider', svg: 'divider', title: 'Divisor', accion: bloque('divider'), md: () => mdInsertarBloque('---') },
+        { id: 'ins-quote', svg: 'quote', title: 'Cita', accion: bloque('quote'), md: () => mdPrefijoDeLinea('> ') },
+        { id: 'ins-code', svg: 'code', title: 'Bloque de código', accion: bloque('code'), md: () => mdInsertarBloque('```\n\n```') },
+        { id: 'ins-diagram', svg: 'diagram', title: 'Diagrama (Mermaid)', accion: bloque('diagram'), md: () => mdInsertarBloque('```mermaid\nflowchart TD\n  A[Empieza] --> B[Sigue]\n```') },
+        { id: 'ins-toggle', svg: 'toggleBlock', title: 'Desplegable', accion: bloque('toggle'), md: () => mdInsertarBloque('::: desplegable Título\nContenido de dentro\n:::') },
       ],
       [
-        { id: 'ins-callout', svg: 'callout', title: 'Callout', accion: bloque('callout') },
-        { id: 'ins-note', svg: 'note', title: 'Nota (alert azul)', accion: bloque('callout-note') },
-        { id: 'ins-tip', svg: 'tip', title: 'Consejo (alert verde)', accion: bloque('callout-tip') },
-        { id: 'ins-important', svg: 'important', title: 'Importante (alert morado)', accion: bloque('callout-important') },
-        { id: 'ins-warning', svg: 'warning', title: 'Aviso (alert amarillo)', accion: bloque('callout-warning') },
-        { id: 'ins-caution', svg: 'caution', title: 'Peligro (alert rojo)', accion: bloque('callout-caution') },
+        { id: 'ins-callout', svg: 'callout', title: 'Callout', accion: bloque('callout'), md: () => mdInsertarBloque('> [!💬]\n> Texto destacado') },
+        { id: 'ins-note', svg: 'note', title: 'Nota (alert azul)', accion: bloque('callout-note'), md: () => mdInsertarBloque('> [!NOTA]\n> ') },
+        { id: 'ins-tip', svg: 'tip', title: 'Consejo (alert verde)', accion: bloque('callout-tip'), md: () => mdInsertarBloque('> [!CONSEJO]\n> ') },
+        { id: 'ins-important', svg: 'important', title: 'Importante (alert morado)', accion: bloque('callout-important'), md: () => mdInsertarBloque('> [!IMPORTANTE]\n> ') },
+        { id: 'ins-warning', svg: 'warning', title: 'Aviso (alert amarillo)', accion: bloque('callout-warning'), md: () => mdInsertarBloque('> [!AVISO]\n> ') },
+        { id: 'ins-caution', svg: 'caution', title: 'Peligro (alert rojo)', accion: bloque('callout-caution'), md: () => mdInsertarBloque('> [!PELIGRO]\n> ') },
       ],
       [
-        { id: 'ins-weblink', svg: 'link', title: 'Enlace web', accion: bloque('weblink') },
-        { id: 'ins-pagelink', svg: 'pagelink', title: 'Enlace a otra página', accion: bloque('pagelink') },
-        { id: 'ins-database', svg: 'database', title: 'Base de datos', accion: bloque('database') },
+        { id: 'ins-weblink', svg: 'link', title: 'Enlace web', accion: bloque('weblink'), md: () => mdEnvolverEnlace('https://') },
+        { id: 'ins-pagelink', svg: 'pagelink', title: 'Enlace a otra página', accion: bloque('pagelink'), md: () => mdEnvolverEnlace('pagina:') },
+        { id: 'ins-database', svg: 'database', title: 'Base de datos', accion: bloque('database'), md: () => mdInsertarBaseDeDatos() },
         {
           id: 'ins-template', svg: 'template', title: 'Pegar el contenido de una plantilla aquí',
           accion: (btn) => openProyectosTemplatePopover(null, btn),
         },
       ],
       [
-        { id: 'ins-toc', svg: 'toc', title: 'Índice de contenido (solo al exportar a PDF)', accion: bloque('pdf-toc') },
-        { id: 'ins-figures', svg: 'figures', title: 'Índice de figuras (solo al exportar a PDF)', accion: bloque('pdf-figures') },
-        { id: 'ins-break', svg: 'pagebreak', title: 'Salto de página (solo al exportar a PDF)', accion: bloque('pdf-break') },
+        { id: 'ins-toc', svg: 'toc', title: 'Índice de contenido (solo al exportar a PDF)', accion: bloque('pdf-toc'), md: () => mdInsertarBloque('::: indice') },
+        { id: 'ins-figures', svg: 'figures', title: 'Índice de figuras (solo al exportar a PDF)', accion: bloque('pdf-figures'), md: () => mdInsertarBloque('::: indice-de-figuras') },
+        { id: 'ins-break', svg: 'pagebreak', title: 'Salto de página (solo al exportar a PDF)', accion: bloque('pdf-break'), md: () => mdInsertarBloque('::: salto-de-pagina') },
       ],
     ],
     tabla: [
@@ -14473,8 +15318,16 @@ function construirCintaProyectos() {
         // global de "clic fuera" — que se dispara con ESTE mismo clic,
         // al burbujear — lo cerraria al instante. Aplazandola, primero
         // se cierra lo que hubiera abierto y luego se abre lo nuevo.
+        if (b.md) btn.dataset.tieneMd = '1';
         btn.addEventListener('click', () => setTimeout(() => {
-          b.accion(btn);
+          // En modo Markdown el boton escribe la marca correspondiente;
+          // en modo Word hace lo de siempre. Misma barra, mismo sitio,
+          // mismo resultado -- solo cambia como se escribe por dentro.
+          if (proyectosModo === 'markdown') {
+            if (b.md) b.md(btn);
+          } else {
+            b.accion(btn);
+          }
           // Y la barra al dia: aplicar una alineacion (o un estilo) no
           // mueve la seleccion, asi que el `selectionchange` que
           // normalmente la refresca no llega y los botones se quedaban
@@ -14522,7 +15375,8 @@ function abrirPopoverDeEstilo(anchor) {
     item.addEventListener('mousedown', (e) => {
       e.preventDefault();
       popover.classList.add('hidden');
-      applyProyectosBlockType(estilo.id, proyectosLineaDestino());
+      if (proyectosModo === 'markdown') mdEstiloDeParrafo(estilo.id);
+      else applyProyectosBlockType(estilo.id, proyectosLineaDestino());
       refrescarCintaProyectos();
     });
     popover.appendChild(item);
@@ -14539,6 +15393,21 @@ function refrescarCintaProyectos() {
   const cinta = document.getElementById('proyectos-ribbon');
   const pagina = document.getElementById('proyectos-page');
   if (!cinta || !pagina || pagina.classList.contains('hidden')) return;
+
+  // En modo Markdown, los botones que no saben escribir su marca se
+  // apagan (no se esconden: la barra no debe cambiar de forma al
+  // cambiar de modo).
+  const enMd = proyectosModo === 'markdown';
+  cinta.querySelectorAll('.proyectos-ribbon-btn').forEach((btn) => {
+    const sirve = !enMd || btn.dataset.tieneMd === '1' || btn.id === 'btn-cinta-estilo';
+    btn.classList.toggle('sin-modo', !sirve);
+  });
+  if (enMd) {
+    // Lo demas (negritas encendidas, estilo de la linea, pestaña de
+    // tabla) se calcula mirando el cuerpo, que en Markdown no es lo que
+    // se esta editando: se deja como esta.
+    return;
+  }
 
   const dentro = document.activeElement === PROYECTOS_BODY();
   // Negrita/cursiva/subrayado/tachado: encendidos segun el navegador.
@@ -17184,6 +18053,8 @@ async function createProyectosGuide() {
     '<div data-align="right">…pegar a la derecha…</div>',
     '<div>…o justificar, con los atajos de la tabla de arriba (los de Word) o desde el menú «/» buscando «alinear». La alineación se hereda al seguir escribiendo, como en Word, hasta que la cambies. Los bloques de código son la excepción: no se alinean. En las celdas de una tabla, además del horizontal está el vertical (arriba/centro/abajo), en el menú <b>▦</b> de la tabla.</div>',
     '<div data-callout="1" data-icon="🔍">Esta guía no lo enseña TODO: abre el menú «/» y repásalo entero — cada opción lleva una pequeña descripción debajo del nombre.</div>',
+    '<h2>Las tres formas de dar formato</h2>',
+    '<div>Lo mismo se puede hacer de tres maneras, y las tres tienen su página en esta guía: con la <b>barra de herramientas</b> (verlo), escribiendo en <b>Markdown</b> (rápido si te sabes las marcas) o con el <b>teclado</b> (lo más rápido de todo). Elige la que te salga; se mezclan sin problema.</div>',
     '<hr>',
     '<h1>Todos los bloques, en vivo</h1>',
     '<h2>Listas</h2>',
@@ -17449,6 +18320,150 @@ async function createProyectosGuide() {
   await api('/api/proyectos-pages', {
     method: 'POST',
     body: JSON.stringify({ title: 'Anexos', icon: '🖼', parentId: pdfTemplate.id, body: '<h2>Índice de figuras</h2><div data-pdf-block="figures"></div>' }),
+  });
+
+
+  // --- 3 bis) Las tres formas de dar formato: barra, Markdown y teclado ---
+  // Koku las pidio como apartados separados dentro de la guia: "uno para
+  // uso de botones, otro para estilo markdown y otro para comandos de
+  // teclado", con las MISMAS funcionalidades en los tres.
+  await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: 'Con la barra de herramientas', icon: '🧰', parentId: guide.id,
+      body: [
+        '<div>La barra de arriba es la forma de <b>ver</b> lo que se puede hacer sin tener que acordarse de nada. Está dividida en pestañas, como en Word.</div>',
+        '<h1>Las pestañas</h1>',
+        '<table><tbody>',
+        '<tr><th>Pestaña</th><th>Para qué</th></tr>',
+        '<tr><td><b>Inicio</b></td><td>El estilo del párrafo (Texto / Título 1-3 / Cita / Código), negrita, cursiva, subrayado, tachado, quitar el formato, las cuatro alineaciones, las tres listas y la sangría.</td></tr>',
+        '<tr><td><b>Insertar</b></td><td>Tabla, imagen, divisor, cita, código, diagrama, desplegable, los seis recuadros de color, enlaces, base de datos, plantilla y los tres bloques que solo salen al exportar a PDF.</td></tr>',
+        '<tr><td><b>Tabla</b></td><td>Solo aparece con el cursor dentro de una tabla. Añadir y quitar filas y columnas, alinear en horizontal y vertical, ancho completo y borrarla.</td></tr>',
+        '<tr><td><b>Página</b></td><td>Lo que es de la página entera: favorito, color de portada, crear página o subpágina, insertar plantilla, vista en paralelo y borrar.</td></tr>',
+        '</tbody></table>',
+        '<div data-callout="1" data-kind="tip">Los botones se <b>encienden</b> según dónde esté el cursor: si estás dentro de una negrita, el botón <b>N</b> aparece marcado. Y el desplegable de la izquierda te dice en qué estilo estás.</div>',
+        '<h2>Sobre varias cosas a la vez</h2>',
+        '<div>Casi todo funciona con una <b>selección</b>, no solo con el cursor: selecciona tres párrafos y pulsa centrar, y se centran los tres. En una tabla, selecciona varias celdas (arrastrando en diagonal) y se alinean todas: se coge el rectángulo entre la primera y la última, como en Word o Excel.</div>',
+        '<h2>La barra se queda arriba</h2>',
+        '<div>Aunque bajes por un documento largo, la barra se queda pegada arriba. Y la pestaña <b>Tabla</b> aparece y desaparece sola según dónde estés.</div>',
+        '<div data-callout="1" data-kind="note">En modo Markdown la barra <b>sigue funcionando</b>: los botones escriben la marca que toque en vez de dar formato. Los que ahí no tienen sentido se ven apagados.</div>',
+      ].join(''),
+    }),
+  });
+
+  await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: 'Escribiendo en Markdown', icon: '✒', parentId: guide.id,
+      body: [
+        '<div>Arriba a la derecha hay un interruptor con dos posiciones: <b>Word</b> y <b>Markdown</b>. Es el mismo documento visto de dos maneras — lo que se guarda no cambia, así que puedes ir y venir cuando quieras.</div>',
+        '<div data-callout="1" data-kind="important">La regla que lo explica todo: <b>una línea = un bloque</b>. A diferencia del Markdown de toda la vida, aquí dos líneas seguidas NO se juntan en un párrafo: cada línea es un bloque de la página, igual que en el modo Word. Por eso el viaje de ida y vuelta es exacto.</div>',
+        '<h1>El texto</h1>',
+        '<table><tbody>',
+        '<tr><th>Escribes</th><th>Y sale</th></tr>',
+        '<tr><td><code>**negrita**</code></td><td><b>negrita</b></td></tr>',
+        '<tr><td><code>*cursiva*</code></td><td><i>cursiva</i></td></tr>',
+        '<tr><td><code>***las dos***</code></td><td><b><i>las dos</i></b></td></tr>',
+        '<tr><td><code>__subrayado__</code></td><td><u>subrayado</u></td></tr>',
+        '<tr><td><code>~~tachado~~</code></td><td><s>tachado</s></td></tr>',
+        '<tr><td><code>`código`</code></td><td><code>código</code></td></tr>',
+        '<tr><td><code>[texto](https://…)</code></td><td>Un enlace web</td></tr>',
+        '<tr><td><code>[texto](pagina:12)</code></td><td>Un enlace a otra página de Proyectos</td></tr>',
+        '</tbody></table>',
+        '<div data-callout="1" data-kind="warning">Ojo con el subrayado: en el Markdown estándar <code>__así__</code> es negrita. Aquí es <u>subrayado</u>, porque la herramienta lo tiene y el Markdown normal no sabe decirlo. La negrita es siempre <code>**así**</code>.</div>',
+        '<h1>Los bloques</h1>',
+        '<table><tbody>',
+        '<tr><th>Escribes</th><th>Y sale</th></tr>',
+        '<tr><td><code># Título</code></td><td>Título 1 (<code>##</code> y <code>###</code> para 2 y 3)</td></tr>',
+        '<tr><td><code>- punto</code></td><td>Lista de viñetas (dos espacios delante = anidada)</td></tr>',
+        '<tr><td><code>1. punto</code></td><td>Lista numerada</td></tr>',
+        '<tr><td><code>- [ ] tarea</code></td><td>Tarea sin marcar (<code>- [x]</code> marcada)</td></tr>',
+        '<tr><td><code>&gt; cita</code></td><td>Una cita</td></tr>',
+        '<tr><td><code>---</code></td><td>Un divisor</td></tr>',
+        '<tr><td><code>```js</code> … <code>```</code></td><td>Bloque de código (pon <code>mermaid</code> para un diagrama)</td></tr>',
+        '<tr><td><code>| a | b |</code></td><td>Una tabla (la fila de guiones separa la cabecera)</td></tr>',
+        '<tr><td><code>![pie](ruta)</code></td><td>Una imagen; con texto entre corchetes es una figura con pie</td></tr>',
+        '</tbody></table>',
+        '<h1>Lo que el Markdown normal no sabe decir</h1>',
+        '<div>Dos convenciones propias para lo que esta herramienta tiene de más:</div>',
+        '<h2>1. Alinear: un sufijo entre llaves</h2>',
+        '<table><tbody>',
+        '<tr><th>Escribes</th><th>Y sale</th></tr>',
+        '<tr><td><code>texto {centro}</code></td><td>Centrado</td></tr>',
+        '<tr><td><code>texto {derecha}</code></td><td>A la derecha</td></tr>',
+        '<tr><td><code>texto {justificado}</code></td><td>Justificado</td></tr>',
+        '<tr><td><code>| celda {v-centro} |</code></td><td>Celda centrada en vertical (o <code>{v-abajo}</code>)</td></tr>',
+        '</tbody></table>',
+        '<h2>2. Lo demás: directivas con tres puntos</h2>',
+        '<table><tbody>',
+        '<tr><th>Escribes</th><th>Y sale</th></tr>',
+        '<tr><td><code>&gt; [!CONSEJO]</code><br><code>&gt; el texto</code></td><td>Un recuadro verde. También NOTA, IMPORTANTE, AVISO y PELIGRO (y valen los ingleses de GitHub: TIP, NOTE…)</td></tr>',
+        '<tr><td><code>&gt; [!💬]</code><br><code>&gt; el texto</code></td><td>Un recuadro con el emoji que quieras</td></tr>',
+        '<tr><td><code>::: base-de-datos 12</code></td><td>La base de datos número 12 (no la borres sin querer: es la tabla entera)</td></tr>',
+        '<tr><td><code>::: desplegable Título</code><br>…<br><code>:::</code></td><td>Un desplegable con cosas dentro</td></tr>',
+        '<tr><td><code>::: indice</code></td><td>El índice de contenido del PDF</td></tr>',
+        '<tr><td><code>::: indice-de-figuras</code></td><td>El índice de figuras del PDF</td></tr>',
+        '<tr><td><code>::: salto-de-pagina</code></td><td>Un salto de hoja en el PDF</td></tr>',
+        '<tr><td><code>::: tabla anchos=120,80</code></td><td>Delante de una tabla: sus anchos de columna, si es de ancho completo o si no tiene cabecera</td></tr>',
+        '</tbody></table>',
+        '<div data-callout="1" data-kind="tip">¿No te acuerdas de una marca? Escribe el bloque en modo <b>Word</b>, cambia a <b>Markdown</b> y mira cómo se escribe. Funciona igual de bien en el otro sentido.</div>',
+        '<h2>Si una línea empieza por un símbolo y NO quieres que sea un bloque</h2>',
+        '<div>Ponle una barra invertida delante: <code>\\# esto no es un título</code>. Al cambiar de modo, la herramienta te la pone sola.</div>',
+      ].join(''),
+    }),
+  });
+
+  await api('/api/proyectos-pages', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: 'Con el teclado', icon: '⌨', parentId: guide.id,
+      body: [
+        '<div>La forma más rápida cuando ya te sabes el camino. <b>Todos estos atajos funcionan en los dos modos</b>: en Word aplican el formato, en Markdown escriben la marca.</div>',
+        '<h1>Formato del texto</h1>',
+        '<table><tbody>',
+        '<tr><th>Tecla</th><th>Hace</th></tr>',
+        '<tr><td><b>Ctrl+B</b></td><td>Negrita</td></tr>',
+        '<tr><td><b>Ctrl+I</b></td><td>Cursiva</td></tr>',
+        '<tr><td><b>Ctrl+U</b></td><td>Subrayado</td></tr>',
+        '<tr><td><b>Ctrl+K</b></td><td>Convertir en enlace lo seleccionado</td></tr>',
+        '<tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>Deshacer / rehacer</td></tr>',
+        '</tbody></table>',
+        '<h1>Alinear (los de Word en español)</h1>',
+        '<table><tbody>',
+        '<tr><th>Tecla</th><th>Hace</th></tr>',
+        '<tr><td><b>Ctrl+Q</b></td><td>A la izquierda (lo normal)</td></tr>',
+        '<tr><td><b>Ctrl+T</b></td><td>Centrar</td></tr>',
+        '<tr><td><b>Ctrl+D</b></td><td>A la derecha</td></tr>',
+        '<tr><td><b>Ctrl+J</b></td><td>Justificar</td></tr>',
+        '</tbody></table>',
+        '<div data-callout="1" data-kind="tip">Con varias líneas o varias celdas seleccionadas, se alinean <b>todas</b>.</div>',
+        '<h1>Insertar y convertir bloques</h1>',
+        '<table><tbody>',
+        '<tr><th>Tecla</th><th>Hace</th></tr>',
+        '<tr><td><b>/</b></td><td>El menú de bloques, con buscador, en cualquier línea</td></tr>',
+        '<tr><td><b>#</b> + espacio</td><td>Título 1 (<b>##</b> y <b>###</b> para 2 y 3)</td></tr>',
+        '<tr><td><b>-</b> + espacio</td><td>Lista de viñetas</td></tr>',
+        '<tr><td><b>1.</b> + espacio</td><td>Lista numerada</td></tr>',
+        '<tr><td><b>[]</b> + espacio</td><td>Tarea con casilla</td></tr>',
+        '<tr><td><b>&gt;</b> + espacio</td><td>Cita</td></tr>',
+        '<tr><td><b>---</b> + Intro</td><td>Divisor</td></tr>',
+        '<tr><td><b>!tip</b>, <b>!nota</b>, <b>!aviso</b>… + espacio</td><td>Recuadro de color</td></tr>',
+        '</tbody></table>',
+        '<h1>Moverse y ordenar</h1>',
+        '<table><tbody>',
+        '<tr><th>Tecla</th><th>Hace</th></tr>',
+        '<tr><td><b>Tab</b></td><td>En una lista, anida; en una tarea, la sangra; en una tabla, salta de celda; en código, cuatro espacios</td></tr>',
+        '<tr><td><b>Mayús+Tab</b></td><td>Lo contrario</td></tr>',
+        '<tr><td><b>Intro</b></td><td>En una tarea crea otra; en una vacía, vuelve a texto normal</td></tr>',
+        '<tr><td><b>Retroceso</b> al principio de una tarea</td><td>Le quita la casilla (no la junta con la línea de arriba)</td></tr>',
+        '<tr><td><b>F2</b></td><td>Renombrar la página (el título queda seleccionado)</td></tr>',
+        '<tr><td><b>Ctrl+Alt+N</b></td><td>Página nueva al mismo nivel</td></tr>',
+        '<tr><td><b>Ctrl+Alt+Mayús+N</b></td><td>Subpágina de esta</td></tr>',
+        '<tr><td><b>Supr</b></td><td>En la galería, con el menú ⋯ abierto: eliminar el proyecto</td></tr>',
+        '</tbody></table>',
+        '<div data-callout="1" data-icon="🧠">Los tres caminos llevan al mismo sitio: lo que hagas con un botón se puede escribir en Markdown y se puede pulsar con el teclado. Usa el que te salga más rápido en cada momento.</div>',
+      ].join(''),
+    }),
   });
 
   // --- 4) Recargar y abrir la guía con sus subpáginas a la vista ---
