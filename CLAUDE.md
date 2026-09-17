@@ -922,6 +922,34 @@ ahora se llama `device`.
         trozo tambien ahi, para que nada pueda salirse de la carpeta
         elegida. **Tocar main.js/preload.js obliga a reiniciar la app.**
 
+    - **FASE 3: indice, subpaginas y ver el proyecto entero**
+      (drivers `drive-f3.js` y `forzar-f3.js`):
+      - **Dos bloques VIVOS** nuevos: `data-proyectos-indice="1"` (los
+        titulos de esta pagina) y `data-proyectos-subpaginas="1"` (las
+        paginas que cuelgan de ella). Funcionan como el de base de
+        datos: en el HTML guardado solo viaja el marcador VACIO y la
+        interfaz lo rellena al abrir (y al escribir, con 0,7 s de
+        retraso). Guardar lo pintado los dejaria congelados y
+        mintiendo. Estan en el menu "/", en la cinta (Insertar) y en
+        Markdown (`::: indice-de-la-pagina` y `::: subpaginas`).
+      - **Segundo interruptor arriba a la derecha: Pagina / Proyecto.**
+        Se combina con el de Word/Markdown, o sea cuatro vistas:
+        pagina+Word = el editor; pagina+Markdown = la caja de texto;
+        proyecto+Word = todas las paginas seguidas; proyecto+Markdown =
+        el Markdown de todo. Las dos de "proyecto" son de LECTURA:
+        editar donde se mezclan varias paginas obligaria a adivinar a
+        cual pertenece cada cambio. `proyectosSincronizarModo()` es el
+        UNICO sitio que decide que superficie se ve.
+      - En la vista de proyecto, las bases de datos se pintan como
+        tabla quieta (igual que en el panel en paralelo) y los bloques
+        vivos se quitan (el indice de cada pagina sobra cuando ya hay
+        uno arriba).
+      - **Volvio a morder la TDZ**: el interruptor nuevo se engancha al
+        cargar y leia `proyectosVista`, declarada mas abajo. Eso lanzo
+        y se llevo por delante medio archivo — el sintoma era un error
+        sobre `proyectosPeekOpen`, que no tenia nada que ver. La
+        declaracion esta ahora arriba, con su comentario.
+
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
 - **`elemento.focus()` a secas sobre un contenteditable manda el cursor

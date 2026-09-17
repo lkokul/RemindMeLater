@@ -161,6 +161,59 @@ tenerlas escritas:
 
 ---
 
+## Fase 3 — Índice, subpáginas y ver el proyecto entero
+
+**Qué se probó**: los dos bloques nuevos (que se mantienen solos), la
+vista del proyecto entero con sus cuatro combinaciones de interruptores,
+y 7 casos de forzado.
+
+### 1. Una página borrada tumbaba la exportación entera · de la Fase 2
+
+- **Qué pasaba**: el exportador pedía cada página por su id sin red de
+  seguridad. Si una había desaparecido entre que se listó y que se pidió
+  (la borraste en otra ventana, o la lista estaba vieja), saltaba un 404
+  y **se caía la exportación completa** — no un aviso, nada: ni un
+  archivo escrito.
+- **Por qué se me pasó**: el exportador se probó con proyectos que
+  existían enteros de principio a fin. Es el clásico "esto no puede
+  pasar" que sí pasa.
+- **Solución**: las páginas se piden ANTES de decidir nada, y la que no
+  conteste se queda fuera del todo (tampoco en el índice, para que no
+  quede un enlace a un archivo que no se escribió). El resto se exporta
+  igual.
+
+### 2. El interruptor nuevo mató el resto del programa · TDZ
+
+- **Qué pasaba**: al conectar el interruptor Página/Proyecto, la app
+  dejó de funcionar del todo — cualquier cosa daba
+  `Cannot access 'proyectosPeekOpen' before initialization`, que no
+  tiene nada que ver.
+- **Por qué**: el interruptor se engancha **al cargar** y leía una
+  variable declarada **más abajo** en el archivo. Eso lanza (zona muerta
+  temporal) y se lleva por delante TODO lo que venía después, así que
+  medio programa se quedó sin existir. El error que se ve señala a la
+  primera víctima, no al culpable.
+- **Solución**: la variable se declara arriba del todo, junto a las
+  otras del mismo grupo, con un comentario que dice por qué está ahí.
+- **Esto ya estaba avisado en CLAUDE.md** desde hace meses y volvió a
+  morder. La regla, otra vez: **lo que se ejecuta al cargar solo puede
+  leer lo que ya está declarado más arriba.**
+
+### 3. Decisiones de diseño que evitaron problemas
+
+- **Los bloques vivos guardan solo el marcador vacío.** Si se guardara
+  lo pintado, el índice se quedaría congelado y mentiría en cuanto
+  cambiaras un título. Se rehace al abrir la página, y al escribir (con
+  0,7 s de retraso, para no rehacerlo en cada tecla).
+- **La vista del proyecto entero es de LECTURA.** Editar ahí obligaría a
+  adivinar a qué página pertenece cada cambio. Se comprobó a propósito
+  que escribir en esa vista no toca nada de lo guardado.
+- **Los bloques vivos se quitan dentro de la vista de proyecto**: el
+  índice de cada página sobra cuando ya hay uno arriba, y las subpáginas
+  vienen justo debajo.
+
+---
+
 ## Cosas que NO eran errores, y conviene tener apuntadas
 
 Dos "fallos" que salieron rojos y resultaron ser de la prueba, no del

@@ -185,6 +185,12 @@ function sanitizePageBody(html) {
       if (dbMatch && DB_BLOCK_ID.test(dbMatch[1])) {
         return `<div data-proyectos-db="${dbMatch[1]}">`;
       }
+      // Bloques VIVOS de la propia pagina: el indice de sus titulos y la
+      // lista de sus subpaginas. Como el de base de datos, en el HTML
+      // solo viaja el marcador vacio; lo de dentro lo monta la interfaz
+      // cada vez que se abre la pagina (asi nunca esta desfasado).
+      if (/\sdata-proyectos-indice\s*=\s*"1"/i.test(attrs)) return '<div data-proyectos-indice="1">';
+      if (/\sdata-proyectos-subpaginas\s*=\s*"1"/i.test(attrs)) return '<div data-proyectos-subpaginas="1">';
       // Bloques "de PDF" (ronda de plantillas de PDF): marcadores que
       // solo cobran vida al exportar -- el indice de contenido, el de
       // figuras y el salto de pagina. Lista cerrada.

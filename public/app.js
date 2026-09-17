@@ -10668,6 +10668,7 @@ async function openProyectosPage(id) {
   renderProyectosBreadcrumb();
   renderProyectosTree();
   renderProyectosSubnav(); // si esta desplegado, que enseñe las de ESTA pagina
+  hydrateProyectosBloquesVivos(); // indice y subpaginas, siempre al dia
   proyectosSincronizarModo(); // deja la vista como toque: bloques o texto
 
   // Recordar que pagina esta abierta, para reabrirla al volver a la
@@ -12183,6 +12184,8 @@ const PROYECTOS_BLOCK_TYPES = [
   // Bloques "de PDF": marcadores que solo cobran vida al exportar (asi
   // el proyecto PUEDE ser la estructura del documento: tu pagina de
   // indice lleva el bloque de indice, etc.).
+  { id: 'indice', label: 'Índice de la página', hint: 'Los títulos de esta página, al día', svgIcon: 'toc', keywords: 'indice titulos contenido tabla navegar' },
+  { id: 'subpaginas', label: 'Lista de subpáginas', hint: 'Las páginas que cuelgan de esta', svgIcon: 'page', keywords: 'subpaginas hijas paginas lista indice' },
   { id: 'pdf-toc', label: 'Índice de contenido (PDF)', hint: 'Se rellena al exportar, con enlaces', icon: '☰', keywords: 'indice contenido tabla contenidos toc pdf exportar' },
   { id: 'pdf-figures', label: 'Índice de figuras (PDF)', hint: 'Lista las imágenes con pie de foto', svgIcon: 'figures', keywords: 'indice figuras imagenes fotos pdf exportar' },
   { id: 'pdf-break', label: 'Salto de página (PDF)', hint: 'El documento salta de hoja aquí', icon: '⤓', keywords: 'salto pagina hoja pdf exportar break' },
@@ -12212,6 +12215,14 @@ function getProyectosBodyHtml() {
   clone.querySelectorAll('[data-proyectos-db]').forEach((el) => {
     const marker = document.createElement('div');
     marker.setAttribute('data-proyectos-db', el.getAttribute('data-proyectos-db'));
+    el.replaceWith(marker);
+  });
+  // Lo mismo con el indice y la lista de subpaginas: solo viaja el
+  // marcador vacio, porque lo de dentro se recalcula al abrir. Si se
+  // guardara el contenido, quedaria congelado y mentiria.
+  clone.querySelectorAll('[data-proyectos-indice], [data-proyectos-subpaginas]').forEach((el) => {
+    const marker = document.createElement('div');
+    marker.setAttribute(el.hasAttribute('data-proyectos-indice') ? 'data-proyectos-indice' : 'data-proyectos-subpaginas', '1');
     el.replaceWith(marker);
   });
   // Los bloques de codigo se guardan como TEXTO PLANO: el coloreado de
@@ -13088,6 +13099,18 @@ function applyProyectosBlockType(typeId, blockOverride = null) {
       marker.after(after);
       hydrateProyectosPdfBlocks();
       placeCaretIn(after);
+      break;
+    }
+    case 'indice': {
+      const div = document.createElement('div');
+      div.setAttribute('data-proyectos-indice', '1');
+      insertarMarcadorVivo(block, div);
+      break;
+    }
+    case 'subpaginas': {
+      const div = document.createElement('div');
+      div.setAttribute('data-proyectos-subpaginas', '1');
+      insertarMarcadorVivo(block, div);
       break;
     }
     case 'table': openProyectosTablePopover(block); break;
@@ -14495,6 +14518,17 @@ function proyectosBloqueAMd(el, out, sangria = '', op = {}) {
       out.push('::: base-de-datos ' + db);
       return;
     }
+    if (el.hasAttribute('data-proyectos-indice')) {
+      // Al exportar a GitHub no tiene sentido: alli no hay bloque vivo
+      // que rellenar (y el indice del proyecto ya va en el README).
+      if (!op.github) out.push('::: indice-de-la-pagina');
+      return;
+    }
+    if (el.hasAttribute('data-proyectos-subpaginas')) {
+      if (!op.github) out.push('::: subpaginas');
+      else if (op.indice) op.indice.forEach((l) => out.push(l));
+      return;
+    }
     const pdf = el.getAttribute('data-pdf-block');
     if (pdf) {
       if (op.github) {
@@ -14614,25 +14648,20 @@ function mdNombreDeArchivo(titulo, i) {
 // imagenes.
 async function proyectosProyectoAMarkdown(raiz) {
   const ids = proyectosSubtreeIds(raiz.id);
+
+  // 1) Los cuerpos, PRIMERO. Una pagina puede haber desaparecido entre
+  //    que se listo y que se pide (la borraste en otra ventana, o la
+  //    lista estaba vieja): esa se queda fuera del todo, en vez de
+  //    tumbar la exportacion entera. Lo encontro el forzado de errores.
   const paginas = [];
-  for (const id of ids) {
-    const p = proyectosPages.find((x) => x.id === id);
-    if (p) paginas.push(p);
-  }
-
-  // 1) Las rutas de cada pagina, para que los enlaces entre ellas
-  //    apunten a su archivo.
-  const rutas = new Map();
-  rutas.set(raiz.id, 'README.md');
-  paginas.filter((p) => p.id !== raiz.id).forEach((p, i) => {
-    rutas.set(p.id, 'paginas/' + mdNombreDeArchivo(p.title, i + 1));
-  });
-
-  // 2) Las bases de datos que haya en los cuerpos, traidas de una vez.
   const cuerpos = new Map();
   const bases = new Map();
-  for (const p of paginas) {
-    const full = await api('/api/proyectos-pages/' + p.id);
+  for (const id of ids) {
+    const p = proyectosPages.find((x) => x.id === id);
+    if (!p) continue;
+    let full;
+    try { full = await api('/api/proyectos-pages/' + id); } catch (err) { continue; }
+    paginas.push(p);
     cuerpos.set(p.id, full.body || '');
     for (const m of (full.body || '').matchAll(/data-proyectos-db="(\d+)"/g)) {
       const dbId = Number(m[1]);
@@ -14640,6 +14669,15 @@ async function proyectosProyectoAMarkdown(raiz) {
       try { bases.set(dbId, await api('/api/proyectos-databases/' + dbId)); } catch (err) { /* borrada */ }
     }
   }
+  if (!paginas.length) return { archivos: [], paginas: 0, imagenes: 0 };
+
+  // 2) Las rutas de cada pagina que SI viaja, para que los enlaces
+  //    entre ellas apunten a su archivo.
+  const rutas = new Map();
+  rutas.set(raiz.id, 'README.md');
+  paginas.filter((p) => p.id !== raiz.id).forEach((p, i) => {
+    rutas.set(p.id, 'paginas/' + mdNombreDeArchivo(p.title, i + 1));
+  });
 
   // 3) El indice del proyecto (lo usa el bloque de indice y el README).
   const indice = paginas.filter((p) => p.id !== raiz.id).map((p) => {
@@ -14824,6 +14862,8 @@ function proyectosMdAHtml(md) {
         i++; continue;
       }
       if (nombre === 'indice') { out.push('<div data-pdf-block="toc"></div>'); i++; continue; }
+      if (nombre === 'indice-de-la-pagina') { out.push('<div data-proyectos-indice="1"></div>'); i++; continue; }
+      if (nombre === 'subpaginas') { out.push('<div data-proyectos-subpaginas="1"></div>'); i++; continue; }
       if (nombre === 'indice-de-figuras') { out.push('<div data-pdf-block="figures"></div>'); i++; continue; }
       if (nombre === 'salto-de-pagina') { out.push('<div data-pdf-block="pagebreak"></div>'); i++; continue; }
       if (nombre === 'desplegable') {
@@ -15022,6 +15062,12 @@ function leerTabla(lineas, i, opciones) {
 
 // 'word' = el editor de bloques de siempre; 'markdown' = el mismo
 // documento como texto. Es una preferencia de ESTE dispositivo.
+// Que se mira: solo esta pagina o el proyecto entero seguido. Se
+// declara AQUI ARRIBA a proposito: el interruptor que la usa se engancha
+// mas abajo pero CORRE AL CARGAR, y una variable let leida antes de su
+// declaracion lanza (zona muerta temporal) y se lleva por delante todo
+// el resto del archivo. Ya paso.
+let proyectosVista = 'pagina';   // 'pagina' | 'proyecto'
 let proyectosModo = 'word';
 let proyectosMdComoEntro = '';   // para saber si de verdad se ha tocado
 let proyectosMdSaveTimer = null;
@@ -15040,6 +15086,7 @@ function proyectosVolcarMdAlCuerpo({ rehidratar = false } = {}) {
   if (rehidratar) {
     hydrateProyectosDbBlocks();
     hydrateProyectosPdfBlocks();
+    hydrateProyectosBloquesVivos();
     highlightProyectosCodeBlocks();
     renderProyectosDiagrams();
     // (los pies de foto no necesitan hidratacion: son <figure> normales)
@@ -15063,28 +15110,24 @@ function ajustarAltoDeLaCajaMd() {
   area.style.height = Math.max(320, area.scrollHeight + 8) + 'px';
 }
 
-function proyectosCambiarModo(modo) {
+async function proyectosCambiarModo(modo) {
   const area = proyectosMdArea();
   const body = PROYECTOS_BODY();
   if (!area || !body) return;
   if (modo === proyectosModo) return;
 
-  if (modo === 'markdown') {
-    proyectosRegenerarMd();
-    body.classList.add('hidden');
-    area.classList.remove('hidden');
-    ajustarAltoDeLaCajaMd();
-  } else {
-    // Si el texto NO se ha tocado, se deja el HTML original tal cual:
-    // asi cambiar de modo para mirar no reescribe nada (y no se pierde
-    // ningun detalle que el Markdown no supiera decir).
-    if (area.value !== proyectosMdComoEntro) proyectosVolcarMdAlCuerpo({ rehidratar: true });
-    area.classList.add('hidden');
-    body.classList.remove('hidden');
+  // Al SALIR de Markdown, si el texto se ha tocado se vuelca al cuerpo.
+  // Si no se ha tocado, se deja el HTML original tal cual: asi cambiar
+  // de modo para mirar no reescribe nada (y no se pierde ningun detalle
+  // que el Markdown no supiera decir). En la vista de proyecto entero
+  // no se vuelca nunca: ahi el texto es de lectura.
+  if (proyectosModo === 'markdown' && modo === 'word'
+      && proyectosVista === 'pagina' && area.value !== proyectosMdComoEntro) {
+    proyectosVolcarMdAlCuerpo({ rehidratar: true });
   }
   proyectosModo = modo;
   try { localStorage.setItem('proyectosModoEscritura', modo); } catch (err) { /* sin guardar */ }
-  actualizarBotonDeModo();
+  await proyectosSincronizarModo();
   refrescarCintaProyectos();
 }
 
@@ -15096,18 +15139,47 @@ function actualizarBotonDeModo() {
 
 // Al abrir/cambiar de pagina hay que dejar la vista de acuerdo con el
 // modo activo (el cuerpo ya viene relleno por openProyectosPage).
-function proyectosSincronizarModo() {
+// Deja a la vista LA UNA de las tres superficies que toque, segun las
+// dos preferencias: que se mira (una pagina o el proyecto entero) y
+// como se escribe (bloques o texto).
+//
+//   pagina   + Word     -> el editor de siempre
+//   pagina   + Markdown -> la caja de texto, editable
+//   proyecto + Word     -> el documento entero, de lectura
+//   proyecto + Markdown -> el Markdown del proyecto entero, de lectura
+async function proyectosSincronizarModo() {
   const area = proyectosMdArea();
   const body = PROYECTOS_BODY();
+  const completo = proyectosCajaCompleta();
   if (!area || !body) return;
-  if (proyectosModo === 'markdown') {
-    proyectosRegenerarMd();
+  const enProyecto = proyectosVista === 'proyecto';
+
+  if (enProyecto) {
     body.classList.add('hidden');
-    area.classList.remove('hidden');
-    ajustarAltoDeLaCajaMd();
+    if (proyectosModo === 'markdown') {
+      if (completo) completo.classList.add('hidden');
+      area.readOnly = true;
+      area.classList.remove('hidden');
+      area.value = await proyectosMdDelProyectoEntero();
+      proyectosMdComoEntro = area.value;
+      ajustarAltoDeLaCajaMd();
+    } else {
+      area.classList.add('hidden');
+      if (completo) completo.classList.remove('hidden');
+      await proyectosMontarDocumentoCompleto();
+    }
   } else {
-    area.classList.add('hidden');
-    body.classList.remove('hidden');
+    if (completo) completo.classList.add('hidden');
+    area.readOnly = false;
+    if (proyectosModo === 'markdown') {
+      proyectosRegenerarMd();
+      body.classList.add('hidden');
+      area.classList.remove('hidden');
+      ajustarAltoDeLaCajaMd();
+    } else {
+      area.classList.add('hidden');
+      body.classList.remove('hidden');
+    }
   }
   actualizarBotonDeModo();
 }
@@ -15205,6 +15277,7 @@ function mdLimpiarFormato() {
 // Se ha tocado el texto: guardar (con retraso) y recolocar el alto.
 function mdCambiado() {
   ajustarAltoDeLaCajaMd();
+  if (proyectosVista !== 'pagina') return; // el proyecto entero es de lectura
   if (proyectosMdSaveTimer) clearTimeout(proyectosMdSaveTimer);
   proyectosMdSaveTimer = setTimeout(() => {
     proyectosMdSaveTimer = null;
@@ -15312,6 +15385,24 @@ function mdEstiloDeParrafo(id) {
   });
 })();
 
+// El interruptor Página / Proyecto entero.
+(function conectarElInterruptorDeVista() {
+  const caja = document.getElementById('proyectos-vista');
+  if (!caja) return;
+  caja.addEventListener('mousedown', (e) => e.preventDefault());
+  caja.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-vista]');
+    if (btn) proyectosCambiarVista(btn.getAttribute('data-vista'));
+  });
+  try {
+    const guardado = localStorage.getItem('proyectosVistaDocumento');
+    if (guardado === 'proyecto' || guardado === 'pagina') proyectosVista = guardado;
+  } catch (err) { /* sin recordar */ }
+  caja.querySelectorAll('[data-vista]').forEach((b) => {
+    b.classList.toggle('active', b.getAttribute('data-vista') === proyectosVista);
+  });
+})();
+
 // El interruptor Word / Markdown.
 (function conectarElInterruptorDeModo() {
   const caja = document.getElementById('proyectos-modo');
@@ -15329,6 +15420,263 @@ function mdEstiloDeParrafo(id) {
   } catch (err) { /* sin recordar */ }
   actualizarBotonDeModo();
 })();
+
+// ---------------------------------------------------------------------
+// FASE 3: bloques VIVOS de indice y subpaginas, y la vista del PROYECTO
+// ENTERO en una sola pagina.
+//
+// Los dos bloques nuevos funcionan como el de base de datos: en el HTML
+// guardado solo viaja un marcador vacio y la interfaz lo rellena cada
+// vez que abre la pagina. Asi nunca se quedan desfasados -- añades un
+// titulo o una subpagina y el indice ya lo sabe, sin tocarlo.
+// ---------------------------------------------------------------------
+
+// El indice de los titulos de ESTA pagina, en vivo.
+function hydrateProyectosIndiceBlocks() {
+  const body = PROYECTOS_BODY();
+  const bloques = [...body.querySelectorAll('[data-proyectos-indice]')];
+  if (!bloques.length) return;
+  const titulos = [...body.querySelectorAll('h1, h2, h3')];
+  const usadas = new Set();
+  const entradas = titulos.map((h) => ({
+    nivel: Number(h.tagName[1]),
+    texto: h.textContent.trim(),
+    el: h,
+  })).filter((t) => t.texto);
+
+  for (const bloque of bloques) {
+    bloque.contentEditable = 'false';
+    bloque.classList.add('proyectos-bloque-vivo');
+    bloque.innerHTML = '';
+    const caja = document.createElement('div');
+    caja.className = 'proyectos-indice';
+    const titulo = document.createElement('div');
+    titulo.className = 'proyectos-bloque-vivo-titulo';
+    titulo.textContent = 'Índice de la página';
+    caja.appendChild(titulo);
+    if (!entradas.length) {
+      const vacio = document.createElement('p');
+      vacio.className = 'hint';
+      vacio.textContent = 'Esta página todavía no tiene títulos. Pon uno (Título 1, 2 o 3) y aparecerá aquí solo.';
+      caja.appendChild(vacio);
+    }
+    for (const entrada of entradas) {
+      const fila = document.createElement('button');
+      fila.type = 'button';
+      fila.className = 'proyectos-indice-item nivel-' + entrada.nivel;
+      fila.textContent = entrada.texto;
+      fila.addEventListener('mousedown', (e) => e.preventDefault());
+      fila.addEventListener('click', () => {
+        entrada.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Un parpadeo para que se vea a donde ha saltado.
+        entrada.el.classList.add('proyectos-titulo-senalado');
+        setTimeout(() => entrada.el.classList.remove('proyectos-titulo-senalado'), 1200);
+      });
+      caja.appendChild(fila);
+    }
+    bloque.appendChild(caja);
+  }
+}
+
+// La lista de subpaginas de ESTA pagina, en vivo.
+function hydrateProyectosSubpaginasBlocks() {
+  const body = PROYECTOS_BODY();
+  const bloques = [...body.querySelectorAll('[data-proyectos-subpaginas]')];
+  if (!bloques.length) return;
+  const hijas = proyectosCurrentPage ? proyectosChildrenOf(proyectosCurrentPage.id) : [];
+
+  for (const bloque of bloques) {
+    bloque.contentEditable = 'false';
+    bloque.classList.add('proyectos-bloque-vivo');
+    bloque.innerHTML = '';
+    const caja = document.createElement('div');
+    caja.className = 'proyectos-subpaginas';
+    const titulo = document.createElement('div');
+    titulo.className = 'proyectos-bloque-vivo-titulo';
+    titulo.textContent = 'Subpáginas';
+    caja.appendChild(titulo);
+    if (!hijas.length) {
+      const vacio = document.createElement('p');
+      vacio.className = 'hint';
+      vacio.textContent = 'Esta página todavía no tiene subpáginas. Crea una con «+ Subpágina» y aparecerá aquí sola.';
+      caja.appendChild(vacio);
+    }
+    for (const hija of hijas) {
+      const fila = document.createElement('button');
+      fila.type = 'button';
+      fila.className = 'proyectos-subpagina-item';
+      const icono = document.createElement('span');
+      icono.className = 'proyectos-inline-icon';
+      setProyectosPageIcon(icono, hija.icon);
+      fila.appendChild(icono);
+      fila.appendChild(document.createTextNode(' ' + (hija.title || 'Sin título')));
+      const nietas = proyectosChildrenOf(hija.id).length;
+      if (nietas) {
+        const cuenta = document.createElement('span');
+        cuenta.className = 'proyectos-subpagina-cuenta';
+        cuenta.textContent = nietas + (nietas === 1 ? ' subpágina' : ' subpáginas');
+        fila.appendChild(cuenta);
+      }
+      fila.addEventListener('mousedown', (e) => e.preventDefault());
+      fila.addEventListener('click', () => openProyectosPage(hija.id));
+      caja.appendChild(fila);
+    }
+    bloque.appendChild(caja);
+  }
+}
+
+// Mete un marcador vivo donde estaba el bloque y deja un hueco debajo
+// para seguir escribiendo (mismo patron que la base de datos: el
+// marcador es una isla, no se escribe dentro).
+function insertarMarcadorVivo(block, marcador) {
+  const despues = emptyProyectosBlock();
+  block.replaceWith(marcador);
+  marcador.after(despues);
+  placeCaretIn(despues);
+  hydrateProyectosBloquesVivos();
+  queueProyectosSaveBody();
+}
+
+// Los dos, de una vez (es lo que se llama al abrir una pagina).
+function hydrateProyectosBloquesVivos() {
+  hydrateProyectosIndiceBlocks();
+  hydrateProyectosSubpaginasBlocks();
+}
+
+// ---------------------------------------------------------------------
+// La vista del PROYECTO ENTERO: todas las paginas seguidas, en una sola
+// pagina. Es de LECTURA: editar en una vista donde se mezclan varias
+// paginas obligaria a adivinar a cual pertenece cada cambio. Para
+// escribir se vuelve a "Página", que es donde vive el editor.
+// ---------------------------------------------------------------------
+const proyectosCajaCompleta = () => document.getElementById('proyectos-completo');
+
+async function proyectosMontarDocumentoCompleto() {
+  const caja = proyectosCajaCompleta();
+  if (!caja || !proyectosCurrentPage) return;
+  const raizId = proyectosCurrentRootId || proyectosCurrentPage.id;
+  const ids = proyectosSubtreeIds(raizId);
+  caja.innerHTML = '<p class="hint">Montando el documento…</p>';
+
+  const trozos = [];
+  for (const id of ids) {
+    const pagina = proyectosPages.find((p) => p.id === id);
+    if (!pagina) continue;
+    let full;
+    try { full = await api('/api/proyectos-pages/' + id); } catch (err) { continue; }
+
+    const seccion = document.createElement('section');
+    seccion.className = 'proyectos-completo-pagina';
+    seccion.dataset.paginaId = String(id);
+
+    const nivel = Math.min(3, 1 + proyectosNivelBajo(pagina, raizId));
+    const encabezado = document.createElement('h' + nivel);
+    encabezado.className = 'proyectos-completo-titulo';
+    const icono = document.createElement('span');
+    icono.className = 'proyectos-inline-icon';
+    setProyectosPageIcon(icono, pagina.icon);
+    encabezado.appendChild(icono);
+    encabezado.appendChild(document.createTextNode(' ' + (pagina.title || 'Sin título')));
+    // Un boton para saltar a editar ESA pagina.
+    const editar = document.createElement('button');
+    editar.type = 'button';
+    editar.className = 'proyectos-completo-editar';
+    editar.textContent = 'Abrir';
+    editar.title = 'Abrir esta página para editarla';
+    editar.addEventListener('click', () => {
+      proyectosCambiarVista('pagina');
+      openProyectosPage(id);
+    });
+    encabezado.appendChild(editar);
+    seccion.appendChild(encabezado);
+
+    const cuerpo = document.createElement('div');
+    cuerpo.className = 'proyectos-page-body proyectos-completo-cuerpo';
+    cuerpo.innerHTML = full.body || '<p class="hint">(vacía)</p>';
+    // Las bases de datos, como tablas quietas: el widget de verdad vive
+    // en el editor, no en una vista de lectura (mismo criterio que el
+    // panel en paralelo).
+    for (const marca of [...cuerpo.querySelectorAll('[data-proyectos-db]')]) {
+      const dbId = Number(marca.getAttribute('data-proyectos-db'));
+      try {
+        const datos = await api('/api/proyectos-databases/' + dbId);
+        marca.replaceWith(buildProyectosPdfDbTable(datos));
+      } catch (err) { marca.remove(); }
+    }
+    // Los bloques vivos de indice/subpaginas no se rellenan aqui: en un
+    // documento seguido, el indice de cada pagina sobra (esta el de
+    // arriba) y las subpaginas ya vienen debajo.
+    for (const marca of [...cuerpo.querySelectorAll('[data-proyectos-indice], [data-proyectos-subpaginas], [data-pdf-block]')]) {
+      marca.remove();
+    }
+    seccion.appendChild(cuerpo);
+    trozos.push(seccion);
+  }
+
+  caja.innerHTML = '';
+  // El indice del documento entero, arriba del todo.
+  if (trozos.length > 1) {
+    const indice = document.createElement('nav');
+    indice.className = 'proyectos-completo-indice';
+    const titulo = document.createElement('div');
+    titulo.className = 'proyectos-bloque-vivo-titulo';
+    titulo.textContent = 'Contenido del proyecto';
+    indice.appendChild(titulo);
+    for (const seccion of trozos) {
+      const pagina = proyectosPages.find((p) => String(p.id) === seccion.dataset.paginaId);
+      const fila = document.createElement('button');
+      fila.type = 'button';
+      fila.className = 'proyectos-indice-item nivel-' + Math.min(3, 1 + proyectosNivelBajo(pagina, raizId));
+      fila.textContent = pagina.title || 'Sin título';
+      fila.addEventListener('click', () => seccion.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      indice.appendChild(fila);
+    }
+    caja.appendChild(indice);
+  }
+  trozos.forEach((s) => caja.appendChild(s));
+
+  // Los diagramas, dibujados (como en el panel en paralelo).
+  if (typeof mermaid !== 'undefined') {
+    for (const pre of [...caja.querySelectorAll('pre[data-lang="mermaid"]')]) {
+      const texto = (pre.textContent || '').trim();
+      if (!texto) continue;
+      const renderId = 'completo-diagrama-' + (++proyectosMermaidSeq);
+      try {
+        const { svg } = await mermaid.render(renderId, texto);
+        const envoltorio = document.createElement('div');
+        envoltorio.className = 'proyectos-diagram-preview';
+        envoltorio.innerHTML = svg;
+        pre.replaceWith(envoltorio);
+      } catch (err) {
+        document.getElementById(renderId)?.remove();
+        document.getElementById('d' + renderId)?.remove();
+      }
+    }
+  }
+}
+
+// El Markdown del proyecto entero (cuando se miran las dos cosas a la
+// vez: proyecto + Markdown). De lectura, como la otra.
+async function proyectosMdDelProyectoEntero() {
+  const raizId = proyectosCurrentRootId || (proyectosCurrentPage && proyectosCurrentPage.id);
+  if (!raizId) return '';
+  const raiz = proyectosPages.find((p) => p.id === raizId);
+  if (!raiz) return '';
+  const { archivos } = await proyectosProyectoAMarkdown(raiz);
+  return archivos.filter((a) => a.contenido)
+    .map((a) => '<!-- ' + a.ruta + ' -->\n' + a.contenido)
+    .join('\n\n');
+}
+
+async function proyectosCambiarVista(vista) {
+  if (vista === proyectosVista) return;
+  proyectosVista = vista;
+  try { localStorage.setItem('proyectosVistaDocumento', vista); } catch (err) { /* sin guardar */ }
+  document.querySelectorAll('#proyectos-vista [data-vista]').forEach((b) => {
+    b.classList.toggle('active', b.getAttribute('data-vista') === vista);
+  });
+  await proyectosSincronizarModo();
+}
 
 // ---------------------------------------------------------------------
 // BARRA DE HERRAMIENTAS estilo Word (pedida por Koku: "los atajos de
@@ -15524,6 +15872,8 @@ function proyectosCintaDefinicion() {
         },
       ],
       [
+        { id: 'ins-indice', svg: 'toc', title: 'Índice de esta página (se mantiene solo)', accion: bloque('indice'), md: () => mdInsertarBloque('::: indice-de-la-pagina') },
+        { id: 'ins-subpaginas', svg: 'page', title: 'Lista de las subpáginas de esta página', accion: bloque('subpaginas'), md: () => mdInsertarBloque('::: subpaginas') },
         { id: 'ins-toc', svg: 'toc', title: 'Índice de contenido (solo al exportar a PDF)', accion: bloque('pdf-toc'), md: () => mdInsertarBloque('::: indice') },
         { id: 'ins-figures', svg: 'figures', title: 'Índice de figuras (solo al exportar a PDF)', accion: bloque('pdf-figures'), md: () => mdInsertarBloque('::: indice-de-figuras') },
         { id: 'ins-break', svg: 'pagebreak', title: 'Salto de página (solo al exportar a PDF)', accion: bloque('pdf-break'), md: () => mdInsertarBloque('::: salto-de-pagina') },
@@ -15746,6 +16096,16 @@ document.getElementById('proyectos-ribbon-tabs').addEventListener('mousedown', (
 construirCintaProyectos();
 document.addEventListener('selectionchange', () => refrescarCintaProyectos());
 PROYECTOS_BODY().addEventListener('input', () => refrescarCintaProyectos());
+// Al escribir, el indice de la pagina puede haber cambiado (has puesto
+// un titulo nuevo). Se rehace con retraso para no hacerlo en cada tecla.
+let proyectosIndiceTimer = null;
+PROYECTOS_BODY().addEventListener('input', () => {
+  if (proyectosIndiceTimer) clearTimeout(proyectosIndiceTimer);
+  proyectosIndiceTimer = setTimeout(() => {
+    proyectosIndiceTimer = null;
+    hydrateProyectosIndiceBlocks();
+  }, 700);
+});
 
 // ---------------------------------------------------------------------
 // Atajos tipo markdown: "#", "##", "###", "-", "*", "1.", "[]", ">"

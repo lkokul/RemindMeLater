@@ -3473,6 +3473,10 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
   padding: 2px; margin-bottom: 0.25rem;
   background: var(--surface-2);
 }
+/* Los dos interruptores (que se mira / como se escribe) van juntos
+   arriba a la derecha, con un respiro entre ellos para que no se lean
+   como un unico control largo. */
+#proyectos-modo { margin-left: 0.4rem; }
 .proyectos-modo button {
   border: none; background: none; color: inherit;
   font: inherit; font-size: 0.75rem; font-weight: 600;
@@ -3859,6 +3863,87 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 .proyectos-db-config-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
 
 /* --- Side peek: la fila abierta como mini-pagina --- */
+
+/* --- Bloques VIVOS: el índice de la página y su lista de subpáginas.
+   Se ven como una tarjeta aparte para que se note que no son texto que
+   se escribe, sino algo que la app mantiene al día sola. --- */
+.proyectos-bloque-vivo {
+  margin: 0.6rem 0;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 0.6rem 0.7rem;
+  user-select: none;
+}
+.proyectos-bloque-vivo-titulo {
+  font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; opacity: 0.55;
+  margin-bottom: 0.35rem;
+}
+.proyectos-indice-item, .proyectos-subpagina-item {
+  display: flex; align-items: center; gap: 0.35rem;
+  width: 100%; text-align: left;
+  border: none; background: none; color: inherit;
+  font: inherit; font-size: 0.92rem;
+  padding: 0.22rem 0.35rem; border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.proyectos-indice-item:hover, .proyectos-subpagina-item:hover { background: var(--surface); }
+.proyectos-indice-item.nivel-2 { padding-left: 1.3rem; font-size: 0.88rem; }
+.proyectos-indice-item.nivel-3 { padding-left: 2.3rem; font-size: 0.85rem; opacity: 0.85; }
+.proyectos-subpagina-cuenta { margin-left: auto; font-size: 0.75rem; opacity: 0.5; }
+/* El parpadeo al saltar a un título desde el índice. */
+.proyectos-titulo-senalado {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: var(--radius-sm);
+  transition: background 0.4s ease;
+}
+
+/* --- El proyecto entero seguido (vista de lectura) --- */
+.proyectos-completo {
+  width: 100%;
+  padding-bottom: 4rem;
+}
+.proyectos-completo.hidden { display: none; }
+.proyectos-completo-indice {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 1.6rem;
+}
+.proyectos-completo-pagina {
+  padding-top: 1.2rem;
+  margin-top: 1.2rem;
+  border-top: 1px solid var(--border);
+}
+.proyectos-completo-pagina:first-of-type { border-top: none; margin-top: 0; }
+.proyectos-completo-titulo {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin: 0 0 0.6rem;
+}
+/* El botón de "Abrir" de cada página, discreto hasta pasar por encima. */
+.proyectos-completo-editar {
+  margin-left: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--surface-text);
+  font: inherit; font-size: 0.75rem; font-weight: 600;
+  padding: 0.15rem 0.6rem;
+  cursor: pointer; opacity: 0.45;
+}
+.proyectos-completo-titulo:hover .proyectos-completo-editar { opacity: 1; }
+.proyectos-completo-editar:hover { border-color: var(--accent); }
+/* El cuerpo de cada página dentro del documento seguido: mismos estilos
+   de bloque que el editor, pero sin poder escribir. */
+.proyectos-completo-cuerpo { min-height: 0; }
+.proyectos-completo-cuerpo .pdf-db { margin: 0.4rem 0; overflow-x: auto; }
+.proyectos-completo-cuerpo .pdf-db-name { font-weight: 700; margin-bottom: 0.25rem; }
+.proyectos-completo-cuerpo .pdf-db th { background: var(--surface-2); }
+.proyectos-completo-cuerpo .pdf-label-pill {
+  display: inline-block; font-size: 0.72rem; font-weight: 600; color: #fff;
+  border-radius: 999px; padding: 0.05rem 0.5rem; margin: 0 0.15rem 0.15rem 0;
+}
+.proyectos-completo-cuerpo .pdf-color-dot {
+  display: inline-block; width: 0.9rem; height: 0.9rem; border-radius: 50%; vertical-align: middle;
+}
 /* --- Vista en PARALELO: el segundo panel de lectura --- */
 /* A diferencia del peek (que flota por encima), este panel PARTE la
    pantalla de verdad: es un hijo flex mas del layout, al lado del
