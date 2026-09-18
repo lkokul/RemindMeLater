@@ -3339,7 +3339,9 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
 
 /* --- La pagina abierta --- */
 .proyectos-page-area {
-  flex: 1; min-width: 0;
+  /* min-width: el editor nunca baja de aqui, pase lo que pase a su
+     derecha (paneles, side peek). Lo que sobra se lo reparten ellos. */
+  flex: 1; min-width: min(380px, 100%);
   overflow-y: auto;
   /* nada de scroll horizontal a nivel de pagina: lo ancho (tablas de
      bases de datos, tableros) scrollea dentro de su propio contenedor */
@@ -3949,13 +3951,31 @@ body.is-resizing-panel { cursor: col-resize; user-select: none; }
    pantalla de verdad: es un hijo flex mas del layout, al lado del
    editor, estilo vista partida de Notepad++. */
 .proyectos-split {
-  width: min(46%, 640px); flex-shrink: 0;
+  flex-shrink: 0;
   background: var(--surface); color: var(--surface-text);
   border-left: 1px solid var(--border);
   display: flex; flex-direction: column;
   min-width: 0;
 }
 .proyectos-split.hidden { display: none; }
+/* --- PANELES: varios a la derecha del editor --- */
+/* El ancho de cada panel lo decide CUANTOS hay abiertos: con tres, uno
+   de 640px no cabria en ninguna pantalla. El minimo esta puesto para
+   que una linea de texto siga siendo legible por estrecho que quede.
+
+   Y la franja de paneles SI se encoge (flex-shrink por defecto) con
+   scroll horizontal dentro: si no, tres paneles con su minimo se comian
+   el editor y lo dejaban en 160px. Lo encontro la prueba midiendo el
+   ancho de verdad, no mirando si el panel estaba. Quien tiene el ancho
+   garantizado es el editor, que es donde se escribe. */
+.proyectos-paneles { display: flex; min-width: 0; overflow-x: auto; }
+.proyectos-paneles.hidden { display: none; }
+.proyectos-paneles[data-paneles="1"] .proyectos-split { width: min(42vw, 560px); }
+.proyectos-paneles[data-paneles="2"] .proyectos-split { width: min(26vw, 420px); }
+.proyectos-paneles[data-paneles="3"] .proyectos-split { width: min(20vw, 360px); }
+.proyectos-split { flex: 0 0 auto; min-width: 260px; }
+/* La opcion "Proyecto entero" del selector, destacada sobre sus paginas. */
+.proyectos-panel-proyecto { font-weight: 700; }
 .proyectos-split-header {
   display: flex; align-items: center; gap: 0.4rem;
   padding: 0.5rem 0.8rem;

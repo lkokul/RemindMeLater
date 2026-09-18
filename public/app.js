@@ -10669,6 +10669,7 @@ async function openProyectosPage(id) {
   renderProyectosTree();
   renderProyectosSubnav(); // si esta desplegado, que enseñe las de ESTA pagina
   hydrateProyectosBloquesVivos(); // indice y subpaginas, siempre al dia
+  renderProyectosPaneles();       // los paneles de al lado, al dia tambien
   proyectosSincronizarModo(); // deja la vista como toque: bloques o texto
 
   // Recordar que pagina esta abierta, para reabrirla al volver a la
@@ -11029,189 +11030,375 @@ async function importProyectosProjectFile() {
 }
 
 // ---------------------------------------------------------------------
-// Vista en PARALELO ("estilo Notepad++", pedida por Koku): un segundo
-// panel a la derecha del editor que enseña OTRA pagina en modo lectura
-// -- de este proyecto o de cualquier otro -- para ver y comparar dos
-// cosas a la vez. Decisiones:
-//   - El panel es de LECTURA: editar en dos sitios a la vez exigiria
-//     dos editores compartiendo el guardado y se pisarian. Para editar
-//     la otra pagina esta el boton ⇄ (la trae al editor y se lleva la
-//     actual al panel).
-//   - Las bases de datos se pintan como tabla ESTATICA (la misma que
-//     usa el PDF): el widget interactivo esta atado al editor.
-//   - Un enlace a pagina dentro del panel se abre en el EDITOR (el
-//     panel se queda como esta): el panel es la referencia quieta.
+// PANELES: varios proyectos (o paginas) a la vista a la vez
+//
+// Sustituye al panel unico "estilo Notepad++" de antes: ahora se pueden
+// abrir hasta tres a la derecha del editor, y cada uno enseña lo que se
+// le diga -- una pagina suelta o un PROYECTO ENTERO seguido.
+//
+// LO QUE HAY QUE ENTENDER: solo hay UN editor. Los paneles son de
+// LECTURA. Tener tres editores vivos a la vez obligaria a que cada uno
+// tuviera su propio cursor, su propio guardado y su propia barra, y a
+// decidir a cual obedecen los atajos de teclado: mucha maquinaria para
+// algo que casi siempre es "mirar una cosa mientras escribo otra". El
+// boton ⇄ de cada panel intercambia su contenido con el del editor, que
+// es lo que de verdad se quiere cuando toca escribir en el otro lado.
 // ---------------------------------------------------------------------
-let proyectosSplitPageId = null;
-let proyectosSplitPickPopover = null;
+const PROYECTOS_MAX_PANELES = 3;
 
-function closeProyectosSplit() {
-  proyectosSplitPageId = null;
-  document.getElementById('proyectos-split').classList.add('hidden');
+// [{ ref: <id de pagina>, tipo: 'pagina' | 'proyecto' }]
+let proyectosPaneles = [];
+
+function guardarProyectosPaneles() {
+  try { localStorage.setItem('proyectosPaneles', JSON.stringify(proyectosPaneles)); } catch (err) { /* sin guardar */ }
+}
+function cargarProyectosPaneles() {
+  try {
+    const guardado = JSON.parse(localStorage.getItem('proyectosPaneles') || '[]');
+    if (!Array.isArray(guardado)) return;
+    // Number.isFinite NO basta: un 1.7 es finito y se colaba tal cual,
+    // y luego `p.id === 1.7` no encaja con NINGUNA pagina -- el panel se
+    // quedaba diciendo "esto ya no existe" para siempre aunque la pagina
+    // 1 estuviera ahi. Un id es un ENTERO o no es un id. Lo encontro el
+    // forzado de errores, no el uso normal.
+    proyectosPaneles = guardado
+      .filter((p) => p && Number.isInteger(Number(p.ref)) && Number(p.ref) > 0)
+      .slice(0, PROYECTOS_MAX_PANELES)
+      .map((p) => ({ ref: Number(p.ref), tipo: p.tipo === 'proyecto' ? 'proyecto' : 'pagina' }));
+  } catch (err) { proyectosPaneles = []; }
 }
 
-// Pinta una pagina en el panel: titulo + cuerpo con las bases vueltas
-// tabla estatica y los diagramas dibujados.
-async function renderProyectosSplit(pageId) {
-  const aside = document.getElementById('proyectos-split');
-  const titleEl = document.getElementById('proyectos-split-title');
-  const bodyEl = document.getElementById('proyectos-split-body');
-  try {
-    const page = await api(`/api/proyectos-pages/${pageId}`);
-    proyectosSplitPageId = page.id;
-    titleEl.innerHTML = '';
-    const iconSpan = document.createElement('span');
-    iconSpan.className = 'proyectos-inline-icon';
-    setProyectosPageIcon(iconSpan, page.icon);
-    titleEl.appendChild(iconSpan);
-    titleEl.appendChild(document.createTextNode(` ${page.title || 'Sin título'}`));
+// ------------------- Pintar contenido de LECTURA ---------------------
 
-    const holder = document.createElement('div');
-    holder.innerHTML = page.body || '<p class="hint">Esta página está vacía.</p>';
-    // Bases de datos: del marcador a la tabla estatica del PDF.
-    for (const marker of [...holder.querySelectorAll('[data-proyectos-db]')]) {
-      const dbId = Number(marker.getAttribute('data-proyectos-db'));
-      try {
-        const data = await api(`/api/proyectos-databases/${dbId}`);
-        marker.replaceWith(buildProyectosPdfDbTable(data));
-      } catch (err) {
-        marker.remove();
-      }
+// El cuerpo de una pagina, en modo lectura: las bases de datos se
+// pintan como tabla quieta (el widget de verdad vive en el editor) y
+// los diagramas se dibujan. Lo comparten los paneles y la vista de
+// proyecto entero, para que no haya dos maneras de enseñar lo mismo.
+async function proyectosPintarLectura(html, destino, { quitarVivos = false } = {}) {
+  destino.innerHTML = html || '<p class="hint">(esta página está vacía)</p>';
+  if (quitarVivos) {
+    destino.querySelectorAll('[data-proyectos-indice], [data-proyectos-subpaginas], [data-pdf-block]')
+      .forEach((el) => el.remove());
+  }
+  for (const marca of [...destino.querySelectorAll('[data-proyectos-db]')]) {
+    const dbId = Number(marca.getAttribute('data-proyectos-db'));
+    try {
+      const datos = await api('/api/proyectos-databases/' + dbId);
+      marca.replaceWith(buildProyectosPdfDbTable(datos));
+    } catch (err) { marca.remove(); }
+  }
+  if (typeof mermaid === 'undefined') return;
+  for (const pre of [...destino.querySelectorAll('pre[data-lang="mermaid"]')]) {
+    const texto = (pre.textContent || '').trim();
+    if (!texto) continue;
+    const renderId = 'lectura-diagrama-' + (++proyectosMermaidSeq);
+    try {
+      const { svg } = await mermaid.render(renderId, texto);
+      const envoltorio = document.createElement('div');
+      envoltorio.className = 'proyectos-diagram-preview';
+      envoltorio.innerHTML = svg;
+      pre.replaceWith(envoltorio);
+    } catch (err) {
+      document.getElementById(renderId)?.remove();
+      document.getElementById('d' + renderId)?.remove();
     }
-    // Diagramas mermaid: dibujados, como en el PDF.
-    if (typeof mermaid !== 'undefined') {
-      for (const pre of [...holder.querySelectorAll('pre[data-lang="mermaid"]')]) {
-        const text = (pre.textContent || '').trim();
-        if (!text) continue;
-        const renderId = `split-diagram-${++proyectosMermaidSeq}`;
+  }
+}
+
+// Un proyecto ENTERO (raiz + todas sus subpaginas) dentro de un
+// contenedor. Lo usan la vista de proyecto y los paneles.
+async function proyectosMontarProyectoEn(destino, raizId, { conIndice = true, alAbrir = null } = {}) {
+  const ids = proyectosSubtreeIds(raizId);
+  destino.innerHTML = '<p class="hint">Montando el documento…</p>';
+  const trozos = [];
+  for (const id of ids) {
+    const pagina = proyectosPages.find((p) => p.id === id);
+    if (!pagina) continue;
+    let full;
+    try { full = await api('/api/proyectos-pages/' + id); } catch (err) { continue; }
+
+    const seccion = document.createElement('section');
+    seccion.className = 'proyectos-completo-pagina';
+    seccion.dataset.paginaId = String(id);
+
+    const nivel = Math.min(3, 1 + proyectosNivelBajo(pagina, raizId));
+    const encabezado = document.createElement('h' + nivel);
+    encabezado.className = 'proyectos-completo-titulo';
+    const icono = document.createElement('span');
+    icono.className = 'proyectos-inline-icon';
+    setProyectosPageIcon(icono, pagina.icon);
+    encabezado.appendChild(icono);
+    encabezado.appendChild(document.createTextNode(' ' + (pagina.title || 'Sin título')));
+    if (alAbrir) {
+      const abrir = document.createElement('button');
+      abrir.type = 'button';
+      abrir.className = 'proyectos-completo-editar';
+      abrir.textContent = 'Abrir';
+      abrir.title = 'Abrir esta página para editarla';
+      abrir.addEventListener('click', () => alAbrir(id));
+      encabezado.appendChild(abrir);
+    }
+    seccion.appendChild(encabezado);
+
+    const cuerpo = document.createElement('div');
+    cuerpo.className = 'proyectos-page-body proyectos-completo-cuerpo';
+    await proyectosPintarLectura(full.body, cuerpo, { quitarVivos: true });
+    seccion.appendChild(cuerpo);
+    trozos.push(seccion);
+  }
+
+  destino.innerHTML = '';
+  if (conIndice && trozos.length > 1) {
+    const indice = document.createElement('nav');
+    indice.className = 'proyectos-completo-indice';
+    const titulo = document.createElement('div');
+    titulo.className = 'proyectos-bloque-vivo-titulo';
+    titulo.textContent = 'Contenido del proyecto';
+    indice.appendChild(titulo);
+    for (const seccion of trozos) {
+      const pagina = proyectosPages.find((p) => String(p.id) === seccion.dataset.paginaId);
+      const fila = document.createElement('button');
+      fila.type = 'button';
+      fila.className = 'proyectos-indice-item nivel-' + Math.min(3, 1 + proyectosNivelBajo(pagina, raizId));
+      fila.textContent = pagina.title || 'Sin título';
+      fila.addEventListener('click', () => seccion.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      indice.appendChild(fila);
+    }
+    destino.appendChild(indice);
+  }
+  trozos.forEach((s) => destino.appendChild(s));
+  if (!trozos.length) destino.innerHTML = '<p class="hint">Este proyecto ya no existe.</p>';
+}
+
+// La vista de proyecto entero del editor (la de la Fase 3) pasa a ser
+// una llamada mas a la funcion de arriba.
+async function proyectosMontarDocumentoCompleto() {
+  const caja = proyectosCajaCompleta();
+  if (!caja || !proyectosCurrentPage) return;
+  await proyectosMontarProyectoEn(caja, proyectosCurrentRootId || proyectosCurrentPage.id, {
+    conIndice: true,
+    alAbrir: (id) => { proyectosCambiarVista('pagina'); openProyectosPage(id); },
+  });
+}
+
+// --------------------------- Los paneles -----------------------------
+
+function contenedorDePaneles() { return document.getElementById('proyectos-paneles'); }
+
+// Que enseña un panel, en palabras.
+function tituloDePanel(entrada) {
+  const pagina = proyectosPages.find((p) => p.id === entrada.ref);
+  if (!pagina) return { icono: null, texto: 'Ya no existe' };
+  return {
+    icono: pagina.icon,
+    texto: (entrada.tipo === 'proyecto' ? 'Proyecto: ' : '') + (pagina.title || 'Sin título'),
+  };
+}
+
+async function renderProyectosPaneles() {
+  const caja = contenedorDePaneles();
+  if (!caja) return;
+  caja.innerHTML = '';
+  caja.dataset.paneles = String(proyectosPaneles.length);
+  caja.classList.toggle('hidden', proyectosPaneles.length === 0);
+
+  proyectosPaneles.forEach((entrada, i) => {
+    const panel = document.createElement('aside');
+    panel.className = 'proyectos-split';
+    panel.dataset.panel = String(i);
+
+    const cabecera = document.createElement('div');
+    cabecera.className = 'proyectos-split-header';
+    const titulo = document.createElement('span');
+    titulo.className = 'proyectos-split-title';
+    const { icono, texto } = tituloDePanel(entrada);
+    const iconoEl = document.createElement('span');
+    iconoEl.className = 'proyectos-inline-icon';
+    setProyectosPageIcon(iconoEl, icono);
+    titulo.appendChild(iconoEl);
+    titulo.appendChild(document.createTextNode(' ' + texto));
+    cabecera.appendChild(titulo);
+    const hueco = document.createElement('div');
+    hueco.className = 'spacer';
+    cabecera.appendChild(hueco);
+
+    const boton = (etiqueta, title, fn) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'icon-btn';
+      b.textContent = etiqueta;
+      b.title = title;
+      b.setAttribute('aria-label', title);
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(b); });
+      cabecera.appendChild(b);
+      return b;
+    };
+    boton('▾', 'Ver otra cosa en este panel',
+      (b) => setTimeout(() => abrirSelectorDePanel(b, (ref, tipo) => {
+        proyectosPaneles[i] = { ref, tipo };
+        guardarProyectosPaneles();
+        renderProyectosPaneles();
+      }), 0));
+    boton('⇄', 'Traer esto al editor (y mandar aquí lo que estás editando)', () => intercambiarPanel(i));
+    boton('✕', 'Cerrar este panel', () => {
+      proyectosPaneles.splice(i, 1);
+      guardarProyectosPaneles();
+      renderProyectosPaneles();
+    });
+    panel.appendChild(cabecera);
+
+    const cuerpo = document.createElement('div');
+    cuerpo.className = 'proyectos-split-body proyectos-page-body';
+    cuerpo.addEventListener('click', (e) => {
+      const enlace = e.target.closest('a');
+      if (!enlace) return;
+      e.preventDefault();
+      const idPagina = enlace.getAttribute('data-page-link');
+      if (idPagina) {
+        // Un enlace a pagina se abre EN ESTE PANEL, no en el editor: el
+        // panel es un sitio donde estas mirando algo, y saltar en el
+        // editor te sacaria de lo que estabas escribiendo.
+        if (proyectosPages.some((p) => p.id === Number(idPagina))) {
+          proyectosPaneles[i] = { ref: Number(idPagina), tipo: 'pagina' };
+          guardarProyectosPaneles();
+          renderProyectosPaneles();
+        } else showAppAlert('La página enlazada ya no existe.');
+        return;
+      }
+      const href = enlace.getAttribute('href');
+      if (href) window.open(href);
+    });
+    panel.appendChild(cuerpo);
+    caja.appendChild(panel);
+
+    // El contenido, al vuelo (cada panel va por su cuenta).
+    (async () => {
+      const pagina = proyectosPages.find((p) => p.id === entrada.ref);
+      if (!pagina) { cuerpo.innerHTML = '<p class="hint">Esto ya no existe. Cierra el panel o elige otra cosa con ▾.</p>'; return; }
+      if (entrada.tipo === 'proyecto') {
+        await proyectosMontarProyectoEn(cuerpo, entrada.ref, {
+          conIndice: true,
+          alAbrir: (id) => { proyectosPaneles[i] = { ref: id, tipo: 'pagina' }; guardarProyectosPaneles(); renderProyectosPaneles(); },
+        });
+      } else {
         try {
-          const { svg } = await mermaid.render(renderId, text);
-          const wrapper = document.createElement('div');
-          wrapper.className = 'proyectos-diagram-preview';
-          wrapper.innerHTML = svg;
-          pre.replaceWith(wrapper);
+          const full = await api('/api/proyectos-pages/' + entrada.ref);
+          await proyectosPintarLectura(full.body, cuerpo);
         } catch (err) {
-          document.getElementById(renderId)?.remove();
-          document.getElementById(`d${renderId}`)?.remove();
+          cuerpo.innerHTML = '<p class="hint">No se pudo cargar.</p>';
         }
       }
-    }
-    bodyEl.innerHTML = '';
-    bodyEl.append(...holder.childNodes);
-    aside.classList.remove('hidden');
-  } catch (err) {
-    titleEl.textContent = 'Vista en paralelo';
-    bodyEl.innerHTML = '<p class="hint">Esta página ya no existe.</p>';
-    aside.classList.remove('hidden');
-  }
+    })();
+  });
 }
 
-// El selector de pagina del panel: lista TODAS las paginas (agrupadas
-// por proyecto, con sangria por nivel) con un buscador encima.
-function openProyectosSplitPicker(anchorEl) {
-  if (!proyectosSplitPickPopover) {
-    proyectosSplitPickPopover = document.createElement('div');
-    proyectosSplitPickPopover.className = 'proyectos-slash-popover proyectos-split-pick-popover hidden';
-    document.body.appendChild(proyectosSplitPickPopover);
+// Traer al editor lo que hay en un panel, y mandar al panel lo que se
+// estaba editando. Si el panel enseña un proyecto entero, al editor va
+// su pagina raiz (es lo unico editable).
+async function intercambiarPanel(i) {
+  const entrada = proyectosPaneles[i];
+  if (!entrada || !proyectosCurrentPage) return;
+  const actual = proyectosCurrentPage.id;
+  const destino = entrada.ref;
+  if (!proyectosPages.some((p) => p.id === destino)) return;
+  proyectosPaneles[i] = { ref: actual, tipo: entrada.tipo };
+  guardarProyectosPaneles();
+  await openProyectosPage(destino);   // esto ya repinta los paneles
+}
+
+// El selector: los proyectos con su "entero" y sus paginas dentro.
+let proyectosPanelPopover = null;
+function abrirSelectorDePanel(anchor, alElegir) {
+  if (!proyectosPanelPopover) {
+    proyectosPanelPopover = document.createElement('div');
+    proyectosPanelPopover.className = 'proyectos-slash-popover proyectos-split-pick-popover hidden';
+    document.body.appendChild(proyectosPanelPopover);
   }
-  const popover = proyectosSplitPickPopover;
+  const popover = proyectosPanelPopover;
 
-  // Aplanar el arbol entero en orden de documento, con su profundidad.
-  const flat = [];
-  const walk = (parentId, depth) => {
-    for (const page of proyectosChildrenOf(parentId)) {
-      flat.push({ page, depth });
-      walk(page.id, depth + 1);
-    }
-  };
-  walk(null, 0);
+  // Todo lo que se puede enseñar: por cada proyecto, "entero" y sus
+  // paginas con su sangria.
+  const opciones = [];
+  for (const raiz of proyectosChildrenOf(null)) {
+    opciones.push({ ref: raiz.id, tipo: 'proyecto', nivel: 0, texto: 'Proyecto entero: ' + (raiz.title || 'Sin título'), icono: raiz.icon, destacado: true });
+    const meter = (padre, nivel) => {
+      for (const hija of proyectosChildrenOf(padre)) {
+        opciones.push({ ref: hija.id, tipo: 'pagina', nivel, texto: hija.title || 'Sin título', icono: hija.icon });
+        meter(hija.id, nivel + 1);
+      }
+    };
+    opciones.push({ ref: raiz.id, tipo: 'pagina', nivel: 1, texto: raiz.title || 'Sin título', icono: raiz.icon });
+    meter(raiz.id, 2);
+  }
 
-  const renderList = (query) => {
+  const pintar = (busqueda) => {
     popover.innerHTML = '';
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'proyectos-search';
-    input.placeholder = 'Buscar página…';
-    input.value = query;
-    input.addEventListener('input', () => renderListKeepFocus(input.value));
-    popover.appendChild(input);
-    const q = query.trim().toLowerCase();
-    const matches = flat.filter(({ page }) => !q || (page.title || '').toLowerCase().includes(q));
-    for (const { page, depth } of matches.slice(0, 40)) {
+    const campo = document.createElement('input');
+    campo.type = 'text';
+    campo.className = 'proyectos-search';
+    campo.placeholder = 'Buscar proyecto o página…';
+    campo.value = busqueda;
+    campo.addEventListener('input', () => { const c = pintar(campo.value); c.focus(); c.setSelectionRange(campo.value.length, campo.value.length); });
+    popover.appendChild(campo);
+    const q = busqueda.trim().toLowerCase();
+    const encajan = opciones.filter((o) => !q || o.texto.toLowerCase().includes(q));
+    for (const o of encajan.slice(0, 60)) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'proyectos-slash-item';
-      btn.style.paddingLeft = `${0.6 + (q ? 0 : depth) * 0.9}rem`;
-      const iconSpan = document.createElement('span');
-      iconSpan.className = 'proyectos-inline-icon';
-      setProyectosPageIcon(iconSpan, page.icon);
-      btn.appendChild(iconSpan);
-      btn.appendChild(document.createTextNode(` ${page.title || 'Sin título'}`));
+      btn.className = 'proyectos-slash-item' + (o.destacado ? ' proyectos-panel-proyecto' : '');
+      btn.style.paddingLeft = (0.6 + (q ? 0 : o.nivel) * 0.7) + 'rem';
+      const ic = document.createElement('span');
+      ic.className = 'proyectos-inline-icon';
+      setProyectosPageIcon(ic, o.icono);
+      btn.appendChild(ic);
+      btn.appendChild(document.createTextNode(' ' + o.texto));
       btn.addEventListener('mousedown', (e) => {
         e.preventDefault();
         popover.classList.add('hidden');
-        renderProyectosSplit(page.id);
+        alElegir(o.ref, o.tipo);
       });
       popover.appendChild(btn);
     }
-    if (matches.length === 0) {
-      const hint = document.createElement('p');
-      hint.className = 'hint';
-      hint.textContent = 'Ninguna página coincide.';
-      popover.appendChild(hint);
+    if (!encajan.length) {
+      const nada = document.createElement('p');
+      nada.className = 'hint';
+      nada.textContent = 'Nada coincide.';
+      popover.appendChild(nada);
     }
-    return input;
+    return campo;
   };
-  function renderListKeepFocus(query) {
-    const input = renderList(query);
-    input.focus();
-    input.setSelectionRange(query.length, query.length);
-  }
 
   popover.classList.remove('hidden');
-  const rect = anchorEl.getBoundingClientRect();
-  popover.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 300)}px`;
-  popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 310))}px`;
-  renderList('').focus();
+  const rect = anchor.getBoundingClientRect();
+  popover.style.top = Math.min(rect.bottom + 6, window.innerHeight - 320) + 'px';
+  popover.style.left = Math.max(8, Math.min(rect.left - 120, window.innerWidth - 320)) + 'px';
+  pintar('').focus();
 }
 
-// El boton de la barra alterna el panel: cerrado -> elegir que pagina
-// ver; abierto -> cerrarlo.
+// El boton de la barra (pestaña "Página" de la cinta): abre un panel
+// nuevo. Se engancha aqui, junto a lo que hace, y no en el bloque de
+// listeners de mas abajo: asi quitar los paneles algun dia es borrar un
+// trozo seguido, que es justo lo que se hizo con el panel unico de
+// antes -- y de paso se vio que el listener se habia quedado huerfano.
 document.getElementById('btn-proyectos-split').addEventListener('click', (e) => {
   e.stopPropagation();
-  const aside = document.getElementById('proyectos-split');
-  if (!aside.classList.contains('hidden')) closeProyectosSplit();
-  else openProyectosSplitPicker(document.getElementById('btn-proyectos-split'));
+  anadirPanelDeProyectos(document.getElementById('btn-proyectos-split'));
 });
-document.getElementById('btn-proyectos-split-pick').addEventListener('click', (e) => {
-  e.stopPropagation();
-  openProyectosSplitPicker(document.getElementById('btn-proyectos-split-pick'));
-});
-document.getElementById('btn-proyectos-split-close').addEventListener('click', () => closeProyectosSplit());
-// ⇄: la pagina del panel pasa al editor y la del editor al panel.
-document.getElementById('btn-proyectos-split-swap').addEventListener('click', async () => {
-  const target = proyectosSplitPageId;
-  if (target === null) return;
-  const current = proyectosCurrentPage ? proyectosCurrentPage.id : null;
-  await openProyectosPage(target);
-  if (current !== null) await renderProyectosSplit(current);
-});
-// Enlaces DENTRO del panel: los de pagina se abren en el editor; los
-// externos, en el navegador (como en el editor).
-document.getElementById('proyectos-split-body').addEventListener('click', (e) => {
-  const link = e.target.closest('a');
-  if (!link) return;
-  e.preventDefault();
-  const pageId = link.getAttribute('data-page-link');
-  if (pageId) {
-    const exists = proyectosPages.some((p) => p.id === Number(pageId));
-    if (exists) openProyectosPage(Number(pageId));
-    else showAppAlert('La página enlazada ya no existe.');
+
+// El boton de la barra: abre un panel nuevo (hasta el tope).
+function anadirPanelDeProyectos(anchor) {
+  if (proyectosPaneles.length >= PROYECTOS_MAX_PANELES) {
+    showAppAlert('Ya hay ' + PROYECTOS_MAX_PANELES + ' paneles abiertos. Cierra uno con la ✕ para abrir otro.');
     return;
   }
-  const href = link.getAttribute('href');
-  if (href) window.open(href);
-});
+  abrirSelectorDePanel(anchor, (ref, tipo) => {
+    proyectosPaneles.push({ ref, tipo });
+    guardarProyectosPaneles();
+    renderProyectosPaneles();
+  });
+}
+
 
 document.getElementById('proyectos-home-tabs').addEventListener('click', (e) => {
   const tab = e.target.closest('[data-home-tab]');
@@ -15385,6 +15572,9 @@ function mdEstiloDeParrafo(id) {
   });
 })();
 
+// Los paneles que quedaron abiertos la ultima vez.
+cargarProyectosPaneles();
+
 // El interruptor Página / Proyecto entero.
 (function conectarElInterruptorDeVista() {
   const caja = document.getElementById('proyectos-vista');
@@ -15403,7 +15593,9 @@ function mdEstiloDeParrafo(id) {
   });
 })();
 
-// El interruptor Word / Markdown.
+// El interruptor Normal / Ingeniero (por dentro sigue diciendo
+// 'word' y 'markdown': eso es lo que se guarda y lo que miran los
+// guiones de prueba; el rotulo es solo lo que se lee).
 (function conectarElInterruptorDeModo() {
   const caja = document.getElementById('proyectos-modo');
   if (!caja) return;
@@ -15550,110 +15742,6 @@ function hydrateProyectosBloquesVivos() {
 // escribir se vuelve a "Página", que es donde vive el editor.
 // ---------------------------------------------------------------------
 const proyectosCajaCompleta = () => document.getElementById('proyectos-completo');
-
-async function proyectosMontarDocumentoCompleto() {
-  const caja = proyectosCajaCompleta();
-  if (!caja || !proyectosCurrentPage) return;
-  const raizId = proyectosCurrentRootId || proyectosCurrentPage.id;
-  const ids = proyectosSubtreeIds(raizId);
-  caja.innerHTML = '<p class="hint">Montando el documento…</p>';
-
-  const trozos = [];
-  for (const id of ids) {
-    const pagina = proyectosPages.find((p) => p.id === id);
-    if (!pagina) continue;
-    let full;
-    try { full = await api('/api/proyectos-pages/' + id); } catch (err) { continue; }
-
-    const seccion = document.createElement('section');
-    seccion.className = 'proyectos-completo-pagina';
-    seccion.dataset.paginaId = String(id);
-
-    const nivel = Math.min(3, 1 + proyectosNivelBajo(pagina, raizId));
-    const encabezado = document.createElement('h' + nivel);
-    encabezado.className = 'proyectos-completo-titulo';
-    const icono = document.createElement('span');
-    icono.className = 'proyectos-inline-icon';
-    setProyectosPageIcon(icono, pagina.icon);
-    encabezado.appendChild(icono);
-    encabezado.appendChild(document.createTextNode(' ' + (pagina.title || 'Sin título')));
-    // Un boton para saltar a editar ESA pagina.
-    const editar = document.createElement('button');
-    editar.type = 'button';
-    editar.className = 'proyectos-completo-editar';
-    editar.textContent = 'Abrir';
-    editar.title = 'Abrir esta página para editarla';
-    editar.addEventListener('click', () => {
-      proyectosCambiarVista('pagina');
-      openProyectosPage(id);
-    });
-    encabezado.appendChild(editar);
-    seccion.appendChild(encabezado);
-
-    const cuerpo = document.createElement('div');
-    cuerpo.className = 'proyectos-page-body proyectos-completo-cuerpo';
-    cuerpo.innerHTML = full.body || '<p class="hint">(vacía)</p>';
-    // Las bases de datos, como tablas quietas: el widget de verdad vive
-    // en el editor, no en una vista de lectura (mismo criterio que el
-    // panel en paralelo).
-    for (const marca of [...cuerpo.querySelectorAll('[data-proyectos-db]')]) {
-      const dbId = Number(marca.getAttribute('data-proyectos-db'));
-      try {
-        const datos = await api('/api/proyectos-databases/' + dbId);
-        marca.replaceWith(buildProyectosPdfDbTable(datos));
-      } catch (err) { marca.remove(); }
-    }
-    // Los bloques vivos de indice/subpaginas no se rellenan aqui: en un
-    // documento seguido, el indice de cada pagina sobra (esta el de
-    // arriba) y las subpaginas ya vienen debajo.
-    for (const marca of [...cuerpo.querySelectorAll('[data-proyectos-indice], [data-proyectos-subpaginas], [data-pdf-block]')]) {
-      marca.remove();
-    }
-    seccion.appendChild(cuerpo);
-    trozos.push(seccion);
-  }
-
-  caja.innerHTML = '';
-  // El indice del documento entero, arriba del todo.
-  if (trozos.length > 1) {
-    const indice = document.createElement('nav');
-    indice.className = 'proyectos-completo-indice';
-    const titulo = document.createElement('div');
-    titulo.className = 'proyectos-bloque-vivo-titulo';
-    titulo.textContent = 'Contenido del proyecto';
-    indice.appendChild(titulo);
-    for (const seccion of trozos) {
-      const pagina = proyectosPages.find((p) => String(p.id) === seccion.dataset.paginaId);
-      const fila = document.createElement('button');
-      fila.type = 'button';
-      fila.className = 'proyectos-indice-item nivel-' + Math.min(3, 1 + proyectosNivelBajo(pagina, raizId));
-      fila.textContent = pagina.title || 'Sin título';
-      fila.addEventListener('click', () => seccion.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-      indice.appendChild(fila);
-    }
-    caja.appendChild(indice);
-  }
-  trozos.forEach((s) => caja.appendChild(s));
-
-  // Los diagramas, dibujados (como en el panel en paralelo).
-  if (typeof mermaid !== 'undefined') {
-    for (const pre of [...caja.querySelectorAll('pre[data-lang="mermaid"]')]) {
-      const texto = (pre.textContent || '').trim();
-      if (!texto) continue;
-      const renderId = 'completo-diagrama-' + (++proyectosMermaidSeq);
-      try {
-        const { svg } = await mermaid.render(renderId, texto);
-        const envoltorio = document.createElement('div');
-        envoltorio.className = 'proyectos-diagram-preview';
-        envoltorio.innerHTML = svg;
-        pre.replaceWith(envoltorio);
-      } catch (err) {
-        document.getElementById(renderId)?.remove();
-        document.getElementById('d' + renderId)?.remove();
-      }
-    }
-  }
-}
 
 // El Markdown del proyecto entero (cuando se miran las dos cosas a la
 // vez: proyecto + Markdown). De lectura, como la otra.
@@ -16928,9 +17016,9 @@ document.addEventListener('click', (e) => {
       && !e.target.closest('.proyectos-hm-popover') && !e.target.closest('.proyectos-hm-cell')) {
     proyectosHmDayPopover.classList.add('hidden');
   }
-  if (proyectosSplitPickPopover && !proyectosSplitPickPopover.classList.contains('hidden')
+  if (proyectosPanelPopover && !proyectosPanelPopover.classList.contains('hidden')
       && !e.target.closest('.proyectos-split-pick-popover')) {
-    proyectosSplitPickPopover.classList.add('hidden');
+    proyectosPanelPopover.classList.add('hidden');
   }
   if (proyectosEstiloPopover && !proyectosEstiloPopover.classList.contains('hidden')
       && !e.target.closest('.proyectos-estilo-popover') && !e.target.closest('#btn-cinta-estilo')) {
@@ -18689,7 +18777,7 @@ async function createProyectosGuide() {
     '<div>…o justificar, con los atajos de la tabla de arriba (los de Word) o desde el menú «/» buscando «alinear». La alineación se hereda al seguir escribiendo, como en Word, hasta que la cambies. Los bloques de código son la excepción: no se alinean. En las celdas de una tabla, además del horizontal está el vertical (arriba/centro/abajo), en el menú <b>▦</b> de la tabla.</div>',
     '<div data-callout="1" data-icon="🔍">Esta guía no lo enseña TODO: abre el menú «/» y repásalo entero — cada opción lleva una pequeña descripción debajo del nombre.</div>',
     '<h2>Las tres formas de dar formato</h2>',
-    '<div>Lo mismo se puede hacer de tres maneras, y las tres tienen su página en esta guía: con la <b>barra de herramientas</b> (verlo), escribiendo en <b>Markdown</b> (rápido si te sabes las marcas) o con el <b>teclado</b> (lo más rápido de todo). Elige la que te salga; se mezclan sin problema.</div>',
+    '<div>Lo mismo se puede hacer de tres maneras, y las tres tienen su página en esta guía: con la <b>barra de herramientas</b> (verlo), escribiendo las marcas en el modo <b>Ingeniero</b> (rápido si te las sabes) o con el <b>teclado</b> (lo más rápido de todo). Elige la que te salga; se mezclan sin problema.</div>',
     '<hr>',
     '<h1>Todos los bloques, en vivo</h1>',
     '<h2>Listas</h2>',
@@ -18981,7 +19069,7 @@ async function createProyectosGuide() {
         '<div>Casi todo funciona con una <b>selección</b>, no solo con el cursor: selecciona tres párrafos y pulsa centrar, y se centran los tres. En una tabla, selecciona varias celdas (arrastrando en diagonal) y se alinean todas: se coge el rectángulo entre la primera y la última, como en Word o Excel.</div>',
         '<h2>La barra se queda arriba</h2>',
         '<div>Aunque bajes por un documento largo, la barra se queda pegada arriba. Y la pestaña <b>Tabla</b> aparece y desaparece sola según dónde estés.</div>',
-        '<div data-callout="1" data-kind="note">En modo Markdown la barra <b>sigue funcionando</b>: los botones escriben la marca que toque en vez de dar formato. Los que ahí no tienen sentido se ven apagados.</div>',
+        '<div data-callout="1" data-kind="note">En el modo <b>Ingeniero</b> la barra <b>sigue funcionando</b>: los botones escriben la marca que toque en vez de dar formato. Los que ahí no tienen sentido se ven apagados.</div>',
       ].join(''),
     }),
   });
@@ -18989,10 +19077,11 @@ async function createProyectosGuide() {
   await api('/api/proyectos-pages', {
     method: 'POST',
     body: JSON.stringify({
-      title: 'Escribiendo en Markdown', icon: '✒', parentId: guide.id,
+      title: 'El modo Ingeniero', icon: '✒', parentId: guide.id,
       body: [
-        '<div>Arriba a la derecha hay un interruptor con dos posiciones: <b>Word</b> y <b>Markdown</b>. Es el mismo documento visto de dos maneras — lo que se guarda no cambia, así que puedes ir y venir cuando quieras.</div>',
-        '<div data-callout="1" data-kind="important">La regla que lo explica todo: <b>una línea = un bloque</b>. A diferencia del Markdown de toda la vida, aquí dos líneas seguidas NO se juntan en un párrafo: cada línea es un bloque de la página, igual que en el modo Word. Por eso el viaje de ida y vuelta es exacto.</div>',
+        '<div>Arriba a la derecha hay un interruptor con dos posiciones: <b>Normal</b> e <b>Ingeniero</b>. Es el mismo documento visto de dos maneras — lo que se guarda no cambia, así que puedes ir y venir cuando quieras.</div>',
+        '<div>En <b>Normal</b> escribes con botones, como en un procesador de textos. En <b>Ingeniero</b> escribes el texto tal cual, con marcas: <code>**negrita**</code>, <code># Título</code>, <code>- lista</code>. Esas marcas se llaman <b>Markdown</b> y son las que usan GitHub y media internet, así que lo que aprendas aquí te sirve fuera.</div>',
+        '<div data-callout="1" data-kind="important">La regla que lo explica todo: <b>una línea = un bloque</b>. A diferencia del Markdown de toda la vida, aquí dos líneas seguidas NO se juntan en un párrafo: cada línea es un bloque de la página, igual que en el modo Normal. Por eso el viaje de ida y vuelta es exacto.</div>',
         '<h1>El texto</h1>',
         '<table><tbody>',
         '<tr><th>Escribes</th><th>Y sale</th></tr>',
@@ -19041,7 +19130,7 @@ async function createProyectosGuide() {
         '<tr><td><code>::: salto-de-pagina</code></td><td>Un salto de hoja en el PDF</td></tr>',
         '<tr><td><code>::: tabla anchos=120,80</code></td><td>Delante de una tabla: sus anchos de columna, si es de ancho completo o si no tiene cabecera</td></tr>',
         '</tbody></table>',
-        '<div data-callout="1" data-kind="tip">¿No te acuerdas de una marca? Escribe el bloque en modo <b>Word</b>, cambia a <b>Markdown</b> y mira cómo se escribe. Funciona igual de bien en el otro sentido.</div>',
+        '<div data-callout="1" data-kind="tip">¿No te acuerdas de una marca? Escribe el bloque en modo <b>Normal</b>, cambia a <b>Ingeniero</b> y mira cómo se escribe. Funciona igual de bien en el otro sentido.</div>',
         '<h2>Si una línea empieza por un símbolo y NO quieres que sea un bloque</h2>',
         '<div>Ponle una barra invertida delante: <code>\\# esto no es un título</code>. Al cambiar de modo, la herramienta te la pone sola.</div>',
       ].join(''),
@@ -19053,7 +19142,7 @@ async function createProyectosGuide() {
     body: JSON.stringify({
       title: 'Con el teclado', icon: '⌨', parentId: guide.id,
       body: [
-        '<div>La forma más rápida cuando ya te sabes el camino. <b>Todos estos atajos funcionan en los dos modos</b>: en Word aplican el formato, en Markdown escriben la marca.</div>',
+        '<div>La forma más rápida cuando ya te sabes el camino. <b>Todos estos atajos funcionan en los dos modos</b>: en <b>Normal</b> aplican el formato, en <b>Ingeniero</b> escriben la marca.</div>',
         '<h1>Formato del texto</h1>',
         '<table><tbody>',
         '<tr><th>Tecla</th><th>Hace</th></tr>',
@@ -19096,7 +19185,7 @@ async function createProyectosGuide() {
         '<tr><td><b>Ctrl+Alt+Mayús+N</b></td><td>Subpágina de esta</td></tr>',
         '<tr><td><b>Supr</b></td><td>En la galería, con el menú ⋯ abierto: eliminar el proyecto</td></tr>',
         '</tbody></table>',
-        '<div data-callout="1" data-icon="🧠">Los tres caminos llevan al mismo sitio: lo que hagas con un botón se puede escribir en Markdown y se puede pulsar con el teclado. Usa el que te salga más rápido en cada momento.</div>',
+        '<div data-callout="1" data-icon="🧠">Los tres caminos llevan al mismo sitio: lo que hagas con un botón se puede escribir a mano en el modo Ingeniero y se puede pulsar con el teclado. Usa el que te salga más rápido en cada momento.</div>',
       ].join(''),
     }),
   });

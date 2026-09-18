@@ -551,18 +551,23 @@
             <button type="button" data-ribbon-tab="tabla" class="proyectos-ribbon-tab proyectos-ribbon-tab-contextual hidden">Tabla</button>
             <button type="button" data-ribbon-tab="pagina" class="proyectos-ribbon-tab">Página</button>
             <div class="spacer"></div>
-            <!-- El VISUALIZADOR: el mismo documento visto como bloques
-                 (Word) o como texto (Markdown). Es un interruptor de dos
-                 posiciones, no dos botones sueltos. -->
+            <!-- COMO se escribe: el mismo documento visto como bloques
+                 ("Normal") o como texto con marcas ("Ingeniero", que por
+                 dentro es Markdown). Es un interruptor de dos posiciones,
+                 no dos botones sueltos.
+                 OJO: los valores de data-modo siguen siendo "word" y
+                 "markdown" a proposito. Son lo que se guarda en el
+                 navegador y lo que miran los guiones de prueba; cambiar
+                 el rotulo no tiene por que cambiar lo de dentro. -->
             <!-- QUE se mira: solo esta página, o el proyecto entero
                  seguido (con sus subpáginas). Lo segundo es de lectura. -->
             <div class="proyectos-modo" id="proyectos-vista" title="Ver solo esta página o el proyecto entero seguido">
               <button type="button" data-vista="pagina" class="active">Página</button>
               <button type="button" data-vista="proyecto">Proyecto</button>
             </div>
-            <div class="proyectos-modo" id="proyectos-modo" title="Cómo quieres ver y escribir esta página">
-              <button type="button" data-modo="word" class="active">Word</button>
-              <button type="button" data-modo="markdown">Markdown</button>
+            <div class="proyectos-modo" id="proyectos-modo" title="Normal: escribes con botones, como en un procesador de textos. Ingeniero: escribes el texto con marcas (Markdown).">
+              <button type="button" data-modo="word" class="active" title="Escribir con botones: negrita, listas, tablas…">Normal</button>
+              <button type="button" data-modo="markdown" title="Escribir con marcas de Markdown: **negrita**, # títulos, - listas…">Ingeniero</button>
             </div>
           </div>
           <div class="proyectos-ribbon-panel" data-ribbon-panel="inicio"></div>
@@ -590,7 +595,7 @@
                Notepad++"): abre un segundo panel de LECTURA a la
                derecha con cualquier otra pagina, para comparar dos
                cosas a la vez. -->
-          <button type="button" id="btn-proyectos-split" class="icon-btn" aria-label="Ver otra página en paralelo" title="Ver otra página en paralelo (panel de lectura a la derecha)">
+          <button type="button" id="btn-proyectos-split" class="icon-btn" aria-label="Abrir un panel al lado" title="Abrir un panel al lado con otra página u otro proyecto entero (hasta 3)">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="3" y="4" width="18" height="16" rx="2"/>
               <line x1="12" y1="4" x2="12" y2="20"/>
@@ -638,22 +643,12 @@ Texto normal con **negrita**, *cursiva* y __subrayado__."></textarea>
           </div>
         </div>
       </section>
-      <!-- Vista en PARALELO: un segundo panel con OTRA pagina en modo
-           lectura (cualquiera, de este proyecto o de otro), para ver y
-           comparar dos cosas a la vez -- estilo vista partida de
-           Notepad++. Se abre desde el boton de la barra de la pagina;
-           las bases de datos se pintan como tabla estatica y los
-           enlaces a pagina se abren en el panel PRINCIPAL. -->
-      <aside id="proyectos-split" class="proyectos-split hidden">
-        <div class="proyectos-split-header">
-          <span id="proyectos-split-title" class="proyectos-split-title"></span>
-          <div class="spacer"></div>
-          <button type="button" id="btn-proyectos-split-pick" class="icon-btn" aria-label="Cambiar de página" title="Ver otra página en este panel">▾</button>
-          <button type="button" id="btn-proyectos-split-swap" class="icon-btn" aria-label="Intercambiar" title="Abrir esta página en el editor (y traer aquí la actual)">⇄</button>
-          <button type="button" id="btn-proyectos-split-close" class="icon-btn" aria-label="Cerrar el panel" title="Cerrar el panel">✕</button>
-        </div>
-        <div id="proyectos-split-body" class="proyectos-split-body proyectos-page-body"></div>
-      </aside>
+      <!-- PANELES: hasta tres a la derecha del editor, cada uno con una
+           página o un proyecto entero. Los monta app.js
+           (renderProyectosPaneles); son de LECTURA -- el editor es uno
+           solo, y el botón ⇄ de cada panel intercambia su contenido con
+           el suyo cuando toca escribir en el otro lado. -->
+      <div id="proyectos-paneles" class="proyectos-paneles hidden"></div>
       <!-- "Side peek": panel lateral que abre una FILA de una base de
            datos como si fuera una mini-pagina (titulo + propiedades +
            cuerpo libre), sin salir de la pagina donde vive la base --

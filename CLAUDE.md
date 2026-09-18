@@ -950,6 +950,51 @@ ahora se llama `device`.
         sobre `proyectosPeekOpen`, que no tenia nada que ver. La
         declaracion esta ahora arriba, con su comentario.
 
+    - **FASE 4: varios paneles a la vez** (drivers `drive-f4.js` y
+      `forzar-f4.js`):
+      - Hasta **TRES paneles** a la derecha del editor, y cada uno
+        enseña lo que se le diga: una pagina suelta o un **proyecto
+        entero** seguido. Sustituye al panel unico "estilo Notepad++".
+        El estado vive en `localStorage` (`proyectosPaneles`), asi que
+        sobrevive a cerrar la app.
+      - **Solo hay UN editor.** Los paneles son de LECTURA, y es a
+        proposito: tres editores vivos querrian tres cursores, tres
+        guardados y una regla para decidir a cual obedece el teclado.
+        El boton **⇄** de cada panel intercambia su contenido con el del
+        editor, que es lo que de verdad se quiere cuando toca escribir
+        en el otro lado.
+      - `proyectosMontarProyectoEn()` es ahora la UNICA forma de montar
+        un proyecto entero: la usan el panel y la vista de proyecto de
+        la Fase 3. Y `proyectosPintarLectura()` es la unica forma de
+        pintar un cuerpo sin editar (bases de datos como tabla quieta,
+        diagramas dibujados).
+      - **Quien tiene el ancho garantizado es el EDITOR.** La franja de
+        paneles se encoge y se desplaza de lado por dentro si sus
+        minimos no caben. Sin eso, tres paneles dejaban el editor en
+        160px — lo pillo la prueba MIDIENDO el ancho, no mirando si el
+        panel estaba.
+      - **Un panel con la pagina borrada no se cierra solo**: se queda
+        diciendo que eso ya no existe. Y un enlace pulsado DENTRO de un
+        panel se abre en ESE panel, no en el editor.
+      - **Trampa que mordio**: el panel viejo se quito como un bloque
+        seguido, y dentro vivia el `addEventListener` del boton de la
+        cinta. El boton se quedo huerfano y no hacia NADA, sin ningun
+        error. Ahora el listener va pegado a su funcion, dentro del
+        mismo bloque. Una prueba que llama a la funcion a mano no lo
+        detecta: hay que pulsar el boton de verdad.
+
+    - **Los dos modos ya no se llaman Word y Markdown**, los renombro
+      Koku ("quiero que busques otros nombres que sean significativos,
+      no word y markdown, tipo normal e ingeniero"). Ahora son
+      **Normal** e **Ingeniero**. Por dentro los valores siguen siendo
+      `'word'` y `'markdown'` A PROPOSITO: es lo que hay guardado en el
+      navegador de Koku y lo que miran los guiones de prueba, y cambiar
+      un rotulo no tiene por que cambiar lo de dentro. La pagina de la
+      guia se llama ahora "El modo Ingeniero" y explica en su primera
+      linea que las marcas son Markdown, que es lo que usa GitHub — el
+      nombre tiene gracia, pero el concepto tiene que seguir siendo
+      buscable.
+
 ## Cosas que ya rompieron una vez (para no repetir el error)
 
 - **`elemento.focus()` a secas sobre un contenteditable manda el cursor

@@ -214,6 +214,77 @@ y 7 casos de forzado.
 
 ---
 
+## Fase 4 — Varios paneles a la vez (y los modos con nombre nuevo)
+
+**Qué se probó**: abrir, cambiar, intercambiar y cerrar paneles, que
+convivan con las otras vistas, y 28 casos de forzado (localStorage
+envenenado, páginas borradas debajo, títulos absurdos, repintados
+pisándose).
+
+### 1. El botón de la barra se quedó SIN listener · fallo mío al sustituir
+
+- **Qué pasaba**: pulsar el botón de abrir un panel no hacía nada. Ni un
+  error, ni un aviso: nada.
+- **Por qué**: el panel único de antes se quitó como un bloque seguido, y
+  dentro de ese bloque vivía también el `addEventListener` del botón de
+  la cinta. Al pegar el módulo nuevo en su sitio, el botón se quedó
+  huérfano. El resto (el selector, los paneles) funcionaba perfectamente
+  si se llamaba a mano — que es justo lo que despista.
+- **Solución**: el listener va ahora **pegado a la función que llama**,
+  dentro del mismo bloque de los paneles. Así el día que esto se
+  sustituya otra vez, se va entero y no queda medio.
+- **Lección**: cuando se quita un bloque de código "de arriba abajo", hay
+  que mirar qué LISTENERS se van con él. Una prueba que llame a la
+  función directamente no lo detecta nunca: hay que **pulsar el botón de
+  verdad**, que es lo que acabó pillándolo.
+
+### 2. Tres paneles dejaban el editor en 160 px · lo pilló la regla, no el ojo
+
+- **Qué pasaba**: con los tres paneles abiertos, el editor se quedaba en
+  160 píxeles de ancho. No estaba roto — estaba inservible.
+- **Por qué**: cada panel tenía un ancho mínimo y ninguno cedía, así que
+  el editor (que sí podía encogerse hasta cero) pagaba la factura entera.
+- **Solución**: quien tiene el ancho garantizado es **el editor**, que es
+  donde se escribe. La franja de paneles se encoge y, si sus tres mínimos
+  no caben, **se desplaza de lado por dentro**. Mejor una franja con
+  scroll que un editor de un dedo de ancho.
+- **Cómo salió**: la prueba MIDE el ancho de verdad
+  (`getBoundingClientRect`), no comprueba si el panel "está". Es la misma
+  lección de las filas deslizables: mirar la clase no vale, hay que medir.
+
+### 3. Un id con decimales dejaba un panel muerto para siempre · forzado
+
+- **Qué pasaba**: metiendo `{"ref": 1.7}` en lo guardado, el panel se
+  quedaba diciendo "esto ya no existe" aunque la página 1 estuviera ahí,
+  y no había forma de recuperarlo salvo cerrarlo.
+- **Por qué**: se validaba con `Number.isFinite()`, y **1,7 es finito**.
+  Luego `pagina.id === 1.7` no encaja con nada.
+- **Solución**: un id es un **entero positivo** o no es un id
+  (`Number.isInteger` y `> 0`). De paso caen el 0 y los negativos.
+- Esto no lo produce el uso normal; sale de que el estado vive en el
+  navegador y ahí puede llegar cualquier cosa (una versión vieja, una
+  copia de seguridad, un dedo). Validar en la PUERTA lo arregla para
+  todos los que leen ese estado — mismo criterio que el cronómetro suelto
+  del Gimnasio.
+
+### 4. Decisiones de diseño que evitaron problemas
+
+- **Solo hay UN editor; los paneles son de lectura.** Tres editores vivos
+  querrían tres cursores, tres guardados y una regla para decidir a cuál
+  obedece el teclado. El botón **⇄** cubre lo que de verdad se quiere:
+  traer al editor lo que estás mirando.
+- **Un panel con la página borrada NO se cierra solo.** Se queda diciendo
+  qué pasó. Que un panel desaparezca de la pantalla por su cuenta se lee
+  como un fallo de la app, no como "esa página ya no está".
+- **Un enlace dentro de un panel se abre EN ESE PANEL**, no en el editor:
+  el panel es donde estás mirando algo, y saltar en el editor te sacaría
+  de lo que estabas escribiendo.
+- **Los diagramas de dos paneles con la misma página no chocan**: cada
+  render lleva su número. Se comprobó a propósito que no queda basura
+  suelta en el documento, que es el fallo típico de Mermaid.
+
+---
+
 ## Cosas que NO eran errores, y conviene tener apuntadas
 
 Dos "fallos" que salieron rojos y resultaron ser de la prueba, no del
